@@ -88,9 +88,9 @@ st.markdown(
 with st.expander("Baseline and slider limits (quick note)", expanded=False):
     st.markdown(
         """
-- **Baseline geometry:** the mean of the dataset parameters (a neutral reference point).
+- **Baseline geometry:** The mean of the dataset parameters (a neutral reference point).
 - **Slider limits:** 5th–95th percentile of the dataset for each parameter (helps avoid extreme, out-of-distribution inputs).
-- **Interpretation:** predictions are most reliable for *interpolation* within the dataset coverage.
+- **Interpretation:** Predictions are most reliable for *interpolation* within the dataset coverage.
 """
     )
 
@@ -232,10 +232,10 @@ with right:
     with st.expander("What do “std” and “p90” mean?", expanded=False):
         st.markdown(
             """
-- **std (standard deviation):** in this app it’s the *disagreement* between the models in the ensemble.  
+- **std (standard deviation):** In this app it’s the *disagreement* between the models in the ensemble.  
   If the models broadly agree, the std is small — that’s usually a sign the prediction is more reliable in that region.
 
-- **p90:** the 90th percentile of uncertainty on a held-out calibration split.  
+- **p90:** The 90th percentile of uncertainty on a held-out calibration split.  
   If the std is above p90, the prediction falls into the most uncertain ~10% of cases, so it’s flagged as **low confidence**.
 
 This is a practical reliability check — not a guaranteed probability.
