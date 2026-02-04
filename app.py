@@ -54,7 +54,7 @@ with st.sidebar:
 
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("Reset to baseline"):
+        if st.button("Reset"):
             reset_sliders(feature_cols)
             st.rerun()
     with c2:
