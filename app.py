@@ -34,7 +34,7 @@ html, body, [class*="css"]  {
 
 /* Modern background */
 .stApp {
-  background: #000000;
+  background: #0b0b0f;
   color: #eef2ff;
 }
 
