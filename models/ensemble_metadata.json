@@ -1,0 +1,63 @@
+{
+  "targets": [
+    "cd",
+    "cl"
+  ],
+  "feature_cols": [
+    "Vehicle_Length",
+    "Vehicle_Width",
+    "Vehicle_Height",
+    "Front_Overhang",
+    "Front_Planview",
+    "Hood_Angle",
+    "Approach_Angle",
+    "Windscreen_Angle",
+    "Greenhouse_Tapering",
+    "Backlight_Angle",
+    "Decklid_Height",
+    "Rearend_tapering",
+    "Rear_Overhang",
+    "Rear_Diffusor_Angle",
+    "Vehicle_Ride_Height",
+    "Vehicle_Pitch"
+  ],
+  "n_models": 30,
+  "ridge_alpha": 1.0,
+  "seed": 42,
+  "thresholds": {
+    "cd_std_p90": 0.001444146995931955,
+    "cl_std_p90": 0.0029114894635456474
+  },
+  "model_files": [
+    "models\\ridge_ensemble_00.joblib",
+    "models\\ridge_ensemble_01.joblib",
+    "models\\ridge_ensemble_02.joblib",
+    "models\\ridge_ensemble_03.joblib",
+    "models\\ridge_ensemble_04.joblib",
+    "models\\ridge_ensemble_05.joblib",
+    "models\\ridge_ensemble_06.joblib",
+    "models\\ridge_ensemble_07.joblib",
+    "models\\ridge_ensemble_08.joblib",
+    "models\\ridge_ensemble_09.joblib",
+    "models\\ridge_ensemble_10.joblib",
+    "models\\ridge_ensemble_11.joblib",
+    "models\\ridge_ensemble_12.joblib",
+    "models\\ridge_ensemble_13.joblib",
+    "models\\ridge_ensemble_14.joblib",
+    "models\\ridge_ensemble_15.joblib",
+    "models\\ridge_ensemble_16.joblib",
+    "models\\ridge_ensemble_17.joblib",
+    "models\\ridge_ensemble_18.joblib",
+    "models\\ridge_ensemble_19.joblib",
+    "models\\ridge_ensemble_20.joblib",
+    "models\\ridge_ensemble_21.joblib",
+    "models\\ridge_ensemble_22.joblib",
+    "models\\ridge_ensemble_23.joblib",
+    "models\\ridge_ensemble_24.joblib",
+    "models\\ridge_ensemble_25.joblib",
+    "models\\ridge_ensemble_26.joblib",
+    "models\\ridge_ensemble_27.joblib",
+    "models\\ridge_ensemble_28.joblib",
+    "models\\ridge_ensemble_29.joblib"
+  ]
+}
