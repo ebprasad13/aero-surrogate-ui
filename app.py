@@ -130,6 +130,20 @@ button[kind="primary"]:hover { filter: brightness(0.96); }
     unsafe_allow_html=True,
 )
 
+/* Floating Controls toggle button */
+.fixed-controls {
+  position: fixed;
+  top: 18px;
+  left: 18px;
+  z-index: 99999;
+  background: rgba(255,255,255,0.10);
+  border: 1px solid rgba(255,255,255,0.18);
+  border-radius: 12px;
+  padding: 10px 12px;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 14px 40px rgba(0,0,0,0.30);
+}
+
 # ============================================================
 # Units (angles in deg; lengths in mm — sensible defaults)
 # ============================================================
@@ -278,6 +292,10 @@ feature_cols = cfg["feature_cols"]
 slider_features = cfg.get("slider_features", feature_cols)  # top 8 (you set this in config)
 targets = cfg["targets"]  # ["cd","cl","clf","clr"]
 
+# --- Controls panel state (works even if the sidebar is collapsed) ---
+if "show_controls_panel" not in st.session_state:
+    st.session_state.show_controls_panel = True
+
 baseline = cfg["baseline"]
 smin = cfg["slider_min"]
 smax = cfg["slider_max"]
@@ -342,6 +360,66 @@ def slider_for(col: str, params_out: dict):
     # show current value only (no "range" copy)
     st.caption(f"Current setting: **{fmt_value(current_val, unit)}**")
 
+# Floating toggle (always visible)
+st.markdown('<div class="fixed-controls">', unsafe_allow_html=True)
+toggle_label = "Hide controls" if st.session_state.show_controls_panel else "Show controls"
+if st.button(toggle_label):
+    st.session_state.show_controls_panel = not st.session_state.show_controls_panel
+    st.rerun()
+st.markdown("</div>", unsafe_allow_html=True)
+
+# If sidebar is collapsed, user can still use this panel
+if st.session_state.show_controls_panel:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.subheader("Controls")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Reset sliders", key="reset_main"):
+            reset_offsets(feature_cols)  # reset all
+            st.rerun()
+    with c2:
+        compute_main = st.button("Compute", type="primary", key="compute_main")
+
+    st.caption("If you’ve hidden the sidebar, use this panel instead — it does the same job.")
+
+    st.markdown("---")
+    st.markdown("**Key parameters**")
+    params_main = {}
+
+    def slider_for_main(col: str):
+        unit = PARAM_UNITS.get(col, "")
+        base_val = float(baseline[col])
+        left = float(smin[col] - base_val)
+        right = float(smax[col] - base_val)
+        key = f"off_{col}"
+        if key not in st.session_state:
+            st.session_state[key] = 0.0
+
+        offset = st.slider(
+            f"{pretty_param_name(col)} ({unit})" if unit else pretty_param_name(col),
+            left, right,
+            float(st.session_state[key]),
+            0.001,
+            key=f"{key}_main"  # separate widget key
+        )
+        # keep the true state in the canonical key
+        st.session_state[key] = offset
+        params_main[col] = base_val + offset
+
+    for col in slider_features:
+        slider_for_main(col)
+
+    st.markdown("---")
+    with st.expander("All parameters", expanded=False):
+        for col in [c for c in feature_cols if c not in slider_features]:
+            slider_for_main(col)
+
+    st.markdown("</div>", unsafe_allow_html=True)
+else:
+    compute_main = False
+    params_main = {}
+
 with st.sidebar:
     st.header("Controls")
     st.caption("Adjust geometry relative to the baseline (dataset mean), then click **Compute**.")
@@ -353,10 +431,12 @@ with st.sidebar:
             st.rerun()
     with c2:
         compute = st.button("Compute", type="primary")
+        compute = compute or compute_main
 
     st.divider()
 
-    params = {}
+    # Merge params from sidebar and main panel
+    params.update(params_main)
 
     st.markdown('<div class="highlight-box">', unsafe_allow_html=True)
     st.subheader("Key parameters")
