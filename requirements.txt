@@ -3,4 +3,11 @@ pandas
 scikit-learn
 matplotlib
 joblib
-streamlit
+streamlit>=1.30
+altair>=5
+numpy
+pandas
+scikit-learn
+matplotlib
+joblib
+
