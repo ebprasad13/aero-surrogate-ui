@@ -166,6 +166,69 @@ def try_load_csv(path: Path) -> pd.DataFrame | None:
         return None
     return None
 
+def normalise_final_metrics(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Converts metrics_final_test_ridge.csv into a consistent schema:
+    columns: target, MAE, RMSE, R2
+    Accepts either (test_MAE/test_RMSE/test_R2) or (MAE/RMSE/R2).
+    """
+    if df is None or df.empty:
+        return df
+
+    cols = {c: c.strip() for c in df.columns}
+    df = df.rename(columns=cols).copy()
+
+    mapping = {}
+    if "test_MAE" in df.columns: mapping["test_MAE"] = "MAE"
+    if "test_RMSE" in df.columns: mapping["test_RMSE"] = "RMSE"
+    if "test_R2" in df.columns: mapping["test_R2"] = "R2"
+
+    df = df.rename(columns=mapping)
+
+    keep = [c for c in ["target", "MAE", "RMSE", "R2"] if c in df.columns]
+    df = df[keep].copy()
+
+    # enforce ordering by target list if present later
+    return df
+
+def summarise_r2_range(df: pd.DataFrame) -> str:
+    r2 = df["R2"].astype(float)
+    return f"{r2.min():.3f}–{r2.max():.3f}"
+
+def summarise_rmse_range(df: pd.DataFrame) -> str:
+    rmse = df["RMSE"].astype(float)
+    return f"{rmse.min():.5f}–{rmse.max():.5f}"
+
+def make_best_model_table(df_baselines: pd.DataFrame) -> pd.DataFrame:
+    """
+    Returns a compact table:
+    per target -> best RMSE model, RMSE, R2, plus ridge_scaled row for comparison.
+    """
+    df = df_baselines.copy()
+    df["RMSE"] = df["RMSE"].astype(float)
+    df["R2"] = df["R2"].astype(float)
+    df["MAE"] = df["MAE"].astype(float)
+
+    # Best by RMSE per target
+    best = (
+        df.sort_values(["target", "RMSE"], ascending=[True, True])
+          .groupby("target", as_index=False)
+          .head(1)
+          .rename(columns={"model": "best_model", "RMSE": "best_RMSE", "R2": "best_R2"})
+    )[["target", "best_model", "best_RMSE", "best_R2"]]
+
+    # Ridge rows for same targets (if present)
+    ridge = df[df["model"].str.contains("ridge", case=False, na=False)].copy()
+    ridge = (
+        ridge.sort_values(["target", "RMSE"])
+             .groupby("target", as_index=False)
+             .head(1)
+             .rename(columns={"RMSE": "ridge_RMSE", "R2": "ridge_R2"})
+    )[["target", "ridge_RMSE", "ridge_R2"]]
+
+    out = best.merge(ridge, on="target", how="left")
+    return out
+
 # ----------------------------
 # Load assets
 # ----------------------------
@@ -178,20 +241,21 @@ targets = cfg["targets"]  # ["cd","cl","clf","clr"]
 baseline = cfg["baseline"]
 smin = cfg["slider_min"]
 smax = cfg["slider_max"]
-thr = cfg["uncertainty_thresholds"]
+thr = cfg["uncertainty_thresholds"]  # used for flags
 baseline_outputs = cfg["baseline_outputs"]
 
-# Optional metadata (if you’ve added it to ui_config_4targets.json)
+# Optional metadata you can add into ui_config_4targets.json
 split_note = cfg.get("split_note", "Group split by run (unseen geometries held out).")
-n_total = cfg.get("n_total", None)
 n_used = cfg.get("n_used", None)
 n_train = cfg.get("n_train", None)
 n_test = cfg.get("n_test", None)
 
-# Metrics files (recommended to commit under models/)
-df_final = try_load_csv(MODELS_DIR / "metrics_final_test_ridge.csv")
-df_baselines = try_load_csv(MODELS_DIR / "metrics_baselines.csv")
-df_thr = try_load_csv(MODELS_DIR / "uncertainty_thresholds_p90.csv")  # optional
+# Metrics files (commit these under models/)
+df_final_raw = try_load_csv(MODELS_DIR / "metrics_final_test_ridge.csv")
+df_base = try_load_csv(MODELS_DIR / "metrics_baselines.csv")
+df_thr_csv = try_load_csv(MODELS_DIR / "uncertainty_thresholds_p90.csv")
+
+df_final = normalise_final_metrics(df_final_raw)
 
 # ----------------------------
 # Header
@@ -213,7 +277,7 @@ st.markdown(
 st.markdown("</div>", unsafe_allow_html=True)
 
 # ----------------------------
-# Sidebar controls (only)
+# Sidebar controls
 # ----------------------------
 with st.sidebar:
     st.header("Controls")
@@ -262,7 +326,7 @@ full_params = dict(baseline)
 full_params.update(params)
 
 # ----------------------------
-# If not computed yet, show instruction and stop
+# If not computed yet
 # ----------------------------
 if not compute:
     left, right = st.columns([1.25, 0.75])
@@ -283,7 +347,7 @@ if not compute:
     st.stop()
 
 # ----------------------------
-# Predict (with spinner for polish)
+# Predict
 # ----------------------------
 with st.spinner("Running surrogate prediction…"):
     X = pd.DataFrame([full_params])[feature_cols]
@@ -304,7 +368,6 @@ with left:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("Predicted coefficients")
 
-    # 2x2 layout with % deltas
     r1c1, r1c2 = st.columns(2)
     r2c1, r2c2 = st.columns(2)
 
@@ -317,17 +380,16 @@ with left:
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("Baseline vs predicted (table)")
-
+    st.subheader("Baseline vs predicted (absolute deltas)")
     tbl = pd.DataFrame(
         {
             "baseline": [baseline_outputs[t] for t in targets],
             "predicted": [pred[t] for t in targets],
-            "delta (absolute)": [delta_abs[t] for t in targets],
+            "delta": [delta_abs[t] for t in targets],
         },
         index=targets,
     )
-    st.dataframe(tbl.style.format({"baseline": "{:.6f}", "predicted": "{:.6f}", "delta (absolute)": "{:+.6f}"}))
+    st.dataframe(tbl.style.format({"baseline": "{:.6f}", "predicted": "{:.6f}", "delta": "{:+.6f}"}))
     st.markdown("</div>", unsafe_allow_html=True)
 
 with right:
@@ -377,94 +439,144 @@ This is a practical reliability check, not a guaranteed probability.
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ----------------------------
-# Technical evaluation (numbers + things F1 reviewers look for)
+# Technical evaluation (curated, not CSV dumps)
 # ----------------------------
 st.markdown('<div class="card">', unsafe_allow_html=True)
 st.subheader("Technical evaluation (model card)")
 
-# Key facts that reviewers care about
 st.markdown("**Model**")
 st.markdown(
     f"""
-- Ensemble size: **{N_MODELS}** (Ridge regression pipelines)
+- Ensemble size: **{N_MODELS}** (Ridge regression pipelines, each with feature scaling)
 - Features: **{len(feature_cols)}** geometry parameters
 - Targets: **{', '.join(targets)}**
 - Split / leakage control: **{split_note}**
 """
 )
 
-# Dataset / usage counts (if you populated them in ui_config; otherwise we compute what we can)
-meta_bits = []
-if n_total is not None:
-    meta_bits.append(f"Total geometries (nominal): **{n_total}**")
-if n_used is not None:
-    meta_bits.append(f"Used for modelling: **{n_used}**")
-if n_train is not None:
-    meta_bits.append(f"Train: **{n_train}**")
-if n_test is not None:
-    meta_bits.append(f"Test: **{n_test}**")
-
-if meta_bits:
+if any(v is not None for v in [n_used, n_train, n_test]):
     st.markdown("**Data**")
-    st.markdown("- " + "\n- ".join(meta_bits))
+    bits = []
+    if n_used is not None:
+        bits.append(f"Geometries used: **{n_used}** (after removing missing runs)")
+    if n_train is not None and n_test is not None:
+        bits.append(f"Train/test: **{n_train}/{n_test}**")
+    st.markdown("- " + "\n- ".join(bits))
 
-# Show your real final test metrics (R2/RMSE etc)
-st.markdown("**Final test performance**")
+st.markdown("**Final test performance (held-out runs)**")
 
-if df_final is None:
-    st.warning(
-        "No `models/metrics_final_test_ridge.csv` found in the deployed repo. "
-        "Commit that file to `models/` to display R² / RMSE here."
+if df_final is None or df_final.empty:
+    st.warning("Final test metrics aren’t available in this deployment.")
+else:
+    # Order rows by target list
+    df_final = df_final.set_index("target").reindex(targets).reset_index()
+
+    # Small, tidy table (only key numbers)
+    perf_tbl = df_final.copy()
+    st.dataframe(
+        perf_tbl.style.format({"MAE": "{:.6f}", "RMSE": "{:.6f}", "R2": "{:.4f}"}),
+        use_container_width=True,
+    )
+
+    # Natural-language technical summary (British tone, but properly technical)
+    r2_range = summarise_r2_range(df_final)
+    rmse_range = summarise_rmse_range(df_final)
+    best = df_final.sort_values("R2", ascending=False).iloc[0]
+    worst = df_final.sort_values("R2", ascending=True).iloc[0]
+
+    st.markdown(
+        f"""
+On the held-out test split, the surrogate achieves **R² = {r2_range}** across the four targets, with **RMSE = {rmse_range}**.
+Best-performing output here is **{best['target']}** (R² **{best['R2']:.4f}**, RMSE **{best['RMSE']:.6f}**), while **{worst['target']}** is the toughest of the four on this split (R² **{worst['R2']:.4f}**, RMSE **{worst['RMSE']:.6f}**).
+"""
+    )
+
+st.divider()
+st.markdown("**Baselines and comparisons**")
+
+if df_base is None or df_base.empty:
+    st.info("Baseline comparison metrics aren’t available in this deployment.")
+else:
+    # Curated comparison: best model per target vs ridge
+    compact = make_best_model_table(df_base).set_index("target").reindex(targets).reset_index()
+
+    st.markdown(
+        "Below is a compact comparison: the **best RMSE model per target** (from the baseline sweep), alongside the Ridge ensemble figures."
+    )
+
+    show = compact.rename(
+        columns={
+            "best_model": "Best model (by RMSE)",
+            "best_RMSE": "Best RMSE",
+            "best_R2": "Best R²",
+            "ridge_RMSE": "Ridge RMSE",
+            "ridge_R2": "Ridge R²",
+        }
+    )
+
+    st.dataframe(
+        show.style.format(
+            {"Best RMSE": "{:.6f}", "Best R²": "{:.4f}", "Ridge RMSE": "{:.6f}", "Ridge R²": "{:.4f}"}
+        ),
+        use_container_width=True,
+    )
+
+    # Short observation line, not braggy
+    # Identify whether ridge is best/close
+    try:
+        close_count = 0
+        for _, row in compact.iterrows():
+            if pd.notna(row["ridge_RMSE"]) and pd.notna(row["best_RMSE"]):
+                if row["ridge_RMSE"] <= row["best_RMSE"] * 1.05:
+                    close_count += 1
+        st.caption(
+            f"As a quick sense-check: Ridge is within ~5% of the best RMSE on **{close_count}/{len(compact)}** targets in this sweep."
+        )
+    except Exception:
+        pass
+
+st.divider()
+st.markdown("**Calibration thresholds (p90)**")
+
+# Prefer showing the thresholds actually used for flagging (from ui_config), but also display CSV if present
+thr_used = {}
+for t in ["cd", "cl", "clf", "clr"]:
+    k = f"{t}_std_p90"
+    if k in thr:
+        thr_used[k] = thr[k]
+
+if thr_used:
+    # sentence summary first
+    parts = []
+    for t in ["cd", "cl", "clf", "clr"]:
+        k = f"{t}_std_p90"
+        if k in thr_used:
+            parts.append(f"{t}: {float(thr_used[k]):.2e}")
+    st.markdown(
+        "Low-confidence flags are triggered when the ensemble standard deviation exceeds the p90 threshold. "
+        f"Thresholds in use: **{', '.join(parts)}**."
     )
 else:
-    # Expecting columns like: target, split, model, r2, rmse, mae ... (we’ll display what exists)
-    # Make it robust by selecting common columns if present
-    cols_prefer = [c for c in ["target", "r2", "rmse", "mae", "mape", "n"] if c in df_final.columns]
-    if not cols_prefer:
-        st.write(df_final)
-    else:
-        view = df_final[cols_prefer].copy()
+    st.info("No p90 thresholds were found in the current config.")
 
-        # Nice formatting
-        fmt = {}
-        if "r2" in view.columns:
-            fmt["r2"] = "{:.4f}"
-        if "rmse" in view.columns:
-            fmt["rmse"] = "{:.6f}"
-        if "mae" in view.columns:
-            fmt["mae"] = "{:.6f}"
-        if "mape" in view.columns:
-            fmt["mape"] = "{:.2f}%"
+# small table (nice for engineers)
+thr_table = pd.DataFrame([thr_used]) if thr_used else pd.DataFrame()
+if not thr_table.empty:
+    st.dataframe(thr_table.style.format("{:.6e}"), use_container_width=True)
 
-        st.dataframe(view.style.format(fmt))
+# Also show the original CSV thresholds if present (but tiny)
+if df_thr_csv is not None and not df_thr_csv.empty:
+    # keep it compact: one row
+    st.caption("Reference thresholds table (as generated during calibration):")
+    st.dataframe(df_thr_csv.style.format("{:.6e}"), use_container_width=True)
 
-        # Quick textual summary (technical, not fluffy)
-        if "r2" in view.columns and "rmse" in view.columns and "target" in view.columns:
-            best = view.sort_values("r2", ascending=False).iloc[0]
-            worst = view.sort_values("r2", ascending=True).iloc[0]
-            st.caption(
-                f"Best R²: {best['target']} = {best['r2']:.4f} (RMSE {best['rmse']:.6f}) · "
-                f"Weakest R²: {worst['target']} = {worst['r2']:.4f} (RMSE {worst['rmse']:.6f})."
-            )
-
-# Optional: show baseline comparison table if present
-with st.expander("Baselines and comparisons (optional)", expanded=False):
-    if df_baselines is None:
-        st.info("Commit `models/metrics_baselines.csv` to show baseline model comparisons here.")
-    else:
-        st.dataframe(df_baselines)
-
-    if df_thr is None:
-        st.info("Commit `models/uncertainty_thresholds_p90.csv` if you’d like the calibrated p90 thresholds shown as a table.")
-    else:
-        st.dataframe(df_thr)
-
+st.divider()
 st.markdown("**Engineering interpretation / limitations**")
 st.markdown(
     """
-- This surrogate is intended for **rapid screening** and **trend exploration**. Any design decision should be verified with higher fidelity when it matters.
-- Expected failure mode: **extrapolation** (inputs near/outside training coverage) — which is why the app surfaces an ensemble-disagreement flag.
-- The uncertainty here is **model disagreement**, not epistemic certainty in a strict probabilistic sense; it is used as a pragmatic “trust but verify” indicator.
+- This surrogate is intended for **rapid screening** and **trend exploration**. If it’s a decision-making case, it still deserves a higher-fidelity check.
+- Expected failure mode is **extrapolation** (inputs near/outside training coverage), which is why the app surfaces an **ensemble-disagreement flag**.
+- The “uncertainty” here is **model disagreement**, not a guaranteed probability. It’s used as a pragmatic *trust-but-verify* indicator.
 """
 )
 
