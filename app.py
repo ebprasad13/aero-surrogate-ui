@@ -34,9 +34,7 @@ html, body, [class*="css"]  {
 
 /* Modern background */
 .stApp {
-  background: radial-gradient(1200px 700px at 15% 10%, rgba(125,90,255,0.28) 0%,
-              rgba(20,32,60,0.92) 35%,
-              rgba(8,10,16,1) 78%);
+  background: #000000;
   color: #eef2ff;
 }
 
