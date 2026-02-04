@@ -15,16 +15,13 @@ N_MODELS = 30
 st.set_page_config(page_title="DrivAerML aero surrogate — demo", layout="wide")
 
 # ----------------------------
-# Styling (keep sidebar + collapsed toggle visible)
+# Styling (keep header so sidebar can always be restored)
 # ----------------------------
 st.markdown(
     """
 <style>
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
-
-/* IMPORTANT: do not hide the Streamlit header entirely.
-   Hiding it can remove the built-in sidebar show/hide affordance on some builds. */
 
 /* Keep the “show sidebar” control visible when sidebar is collapsed */
 [data-testid="stSidebarCollapsedControl"] {
@@ -103,14 +100,12 @@ PARAM_UNITS = {
     "Front_Overhang": "mm",
     "Rear_Overhang": "mm",
     "Vehicle_Ride_Height": "mm",
-
     "Hood_Angle": "deg",
     "Approach_Angle": "deg",
     "Windscreen_Angle": "deg",
     "Backlight_Angle": "deg",
     "Rear_Diffusor_Angle": "deg",
     "Vehicle_Pitch": "deg",
-
     "Front_Planview": "mm",
     "Greenhouse_Tapering": "mm",
     "Decklid_Height": "mm",
@@ -178,6 +173,9 @@ smax = cfg["slider_max"]
 thr = cfg["uncertainty_thresholds"]
 baseline_outputs = cfg["baseline_outputs"]
 
+# Optional: show influential list if present in config; else derive from slider list
+influential_hint = cfg.get("influential_hint", slider_features)
+
 # ----------------------------
 # Header
 # ----------------------------
@@ -186,13 +184,13 @@ st.title("DrivAerML aero surrogate — demo")
 st.markdown(
     """
 **What this demo does**
-- Predicts **cd, cl, clf, clr** from a small set of geometry parameters.
+- Predicts **cd, cl, clf, clr** from a compact set of geometry parameters.
 
 **How it works**
 - Uses an **ensemble of Ridge regression pipelines** trained on **DrivAerML** (500 CFD-tested DrivAer variants).
 
 **How to read the sliders**
-- Slider values are **geometry deltas (Δ)** relative to the baseline DrivAer shape, with units shown per parameter.
+- Slider values are **geometry deltas (Δ)** relative to the baseline DrivAer shape.
 """
 )
 st.markdown("</div>", unsafe_allow_html=True)
@@ -252,14 +250,38 @@ full_params.update(params)
 # If not computed yet, show instruction and stop
 # ----------------------------
 if not compute:
-    st.info("Adjust sliders in the sidebar, then click **Compute**.")
+    left, right = st.columns([1.25, 0.75])
+    with left:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.subheader("Predicted coefficients")
+        st.info("Adjust sliders in the sidebar, then click **Compute**.")
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.subheader("Quick notes")
+        st.markdown(
+            """
+- This is a fast screening tool for exploring trends.
+- Predictions are usually most reliable near the baseline and within the dataset’s coverage.
+"""
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with right:
+        st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.subheader("Uncertainty / reliability")
+        st.info("Click **Compute** to evaluate uncertainty for the current configuration.")
+        st.caption("As a rule of thumb, the ensemble tends to agree more near the baseline, and less as you push towards the edges of dataset coverage.")
+        st.markdown("</div>", unsafe_allow_html=True)
+
     st.stop()
 
 # ----------------------------
-# Predict
+# Predict (with spinner for polish)
 # ----------------------------
-X = pd.DataFrame([full_params])[feature_cols]
-mean, std = ensemble_predict(models, X)
+with st.spinner("Running surrogate prediction…"):
+    X = pd.DataFrame([full_params])[feature_cols]
+    mean, std = ensemble_predict(models, X)
 
 pred = {t: float(mean[0, i]) for i, t in enumerate(targets)}
 unc = {t: float(std[0, i]) for i, t in enumerate(targets)}
@@ -302,6 +324,17 @@ with left:
     st.dataframe(tbl.style.format({"baseline": "{:.6f}", "predicted": "{:.6f}", "delta (absolute)": "{:+.6f}"}))
     st.markdown("</div>", unsafe_allow_html=True)
 
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.subheader("What to try next (quick suggestions)")
+    st.markdown(
+        """
+- Change one slider at a time and watch which coefficients respond most strongly.
+- If an output becomes **low confidence**, nudge parameters back towards baseline and re-check.
+- Use this as a fast *trend explorer*, then confirm any “interesting” cases with CFD in a real workflow.
+"""
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+
 with right:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("Uncertainty / reliability")
@@ -328,12 +361,13 @@ This is a practical reliability check, not a guaranteed probability.
     def show_row(t):
         thr_val = float(thr.get(f"{t}_std_p90", np.nan))
         flagged = is_low_conf(t)
+        icon = "⚠️" if flagged else "✅"
         status = "Low confidence" if flagged else "High confidence"
 
         if np.isnan(thr_val):
-            st.write(f"**{t}**: std `{unc[t]:.2e}` → **{status}**")
+            st.write(f"**{t}**: std `{unc[t]:.2e}` → {icon} **{status}**")
         else:
-            st.write(f"**{t}**: std `{unc[t]:.2e}` vs p90 `{thr_val:.2e}` → **{status}**")
+            st.write(f"**{t}**: std `{unc[t]:.2e}` vs p90 `{thr_val:.2e}` → {icon} **{status}**")
         return flagged
 
     flags = [show_row(t) for t in ["cd", "cl", "clf", "clr"]]
@@ -346,3 +380,39 @@ This is a practical reliability check, not a guaranteed probability.
 
     st.caption("As a rule of thumb, the ensemble tends to agree more near the baseline, and less as you push towards the edges of dataset coverage.")
     st.markdown("</div>", unsafe_allow_html=True)
+
+# ----------------------------
+# Technical notes (humble but not hiding the work)
+# ----------------------------
+st.markdown('<div class="card">', unsafe_allow_html=True)
+st.subheader("Technical notes (for the curious)")
+
+st.markdown(
+    """
+This demo is intended as a lightweight *surrogate* — useful for fast iteration and intuition, not a substitute for CFD sign-off.
+
+**Training**
+- Model: an **ensemble of Ridge regression pipelines** (linear model with L2 regularisation).
+- Inputs: DrivAerML geometry parameters (a compact set of physically meaningful shape variables).
+- Outputs: **cd, cl, clf, clr** from time-averaged CFD forces (constant reference values).
+
+**Validation**
+- Evaluation is designed to reflect **unseen runs**, rather than random shuffles, to avoid overly optimistic results.
+- In the project repo, results are supported by predicted-vs-actual plots and error distributions.
+
+**Reliability**
+- The uncertainty shown here is **ensemble disagreement (std)** — a practical indicator of when the model is being pushed beyond familiar patterns.
+- The **p90 threshold** flags the most uncertain ~10% of cases based on a held-out calibration split.
+
+**Limitations**
+- Like most surrogates, it is strongest at **interpolation** (within dataset coverage) and weaker for aggressive extrapolation.
+- For engineering decisions, treat it as a fast screening tool and verify important cases with higher fidelity.
+"""
+)
+
+# Optional small sensitivity hint (kept humble)
+st.markdown("**Most-influential parameters shown in this demo**")
+st.write(", ".join([pretty_param_name(x) for x in influential_hint]))
+
+st.caption("Built by ebprasad · DrivAerML dataset by N. Ashton et al. (see dataset citation in the repo)")
+st.markdown("</div>", unsafe_allow_html=True)
