@@ -7,18 +7,9 @@ import streamlit as st
 import matplotlib.pyplot as plt
 
 MODELS_DIR = Path("models")
+N_MODELS = 30
 
 st.set_page_config(page_title="Aero Surrogate Demo", layout="wide")
-
-@st.cache_resource
-def load_models_and_config():
-    with open(MODELS_DIR / "ui_config_4targets.json", "r", encoding="utf-8") as f:
-        cfg = json.load(f)
-
-    models = []
-    for m in range(30):
-        models.append(joblib.load(MODELS_DIR / f"ridge4_ensemble_{m:02d}.joblib"))
-    return cfg, models
 
 def ensemble_predict(models, X):
     preds = np.stack([m.predict(X) for m in models], axis=0)
@@ -29,41 +20,62 @@ def pct_change(new, base):
         return np.nan
     return (new - base) / abs(base) * 100.0
 
-def reset_sliders(feature_cols):
-    for c in feature_cols:
+def reset_sliders(slider_features):
+    for c in slider_features:
         st.session_state[f"off_{c}"] = 0.0
 
+@st.cache_resource
+def load_models_and_config():
+    cfg_path = MODELS_DIR / "ui_config_4targets.json"
+    if not cfg_path.exists():
+        st.error("Missing file: models/ui_config_4targets.json (commit it to the repo).")
+        st.stop()
+
+    with open(cfg_path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+
+    model_paths = [MODELS_DIR / f"ridge4_ensemble_{m:02d}.joblib" for m in range(N_MODELS)]
+    missing = [str(p) for p in model_paths if not p.exists()]
+    if missing:
+        st.error("Missing model files in /models. Upload these to the repo:")
+        st.code("\n".join(missing))
+        st.stop()
+
+    models = [joblib.load(p) for p in model_paths]
+    return cfg, models
+
 cfg, models = load_models_and_config()
+
 feature_cols = cfg["feature_cols"]
+slider_features = cfg.get("slider_features", feature_cols)  # fallback
 targets = cfg["targets"]
 baseline = cfg["baseline"]
 smin = cfg["slider_min"]
 smax = cfg["slider_max"]
-thr = cfg.get("uncertainty_thresholds", {})
+thr = cfg["uncertainty_thresholds"]
 baseline_outputs = cfg["baseline_outputs"]
 
 st.title("Aerodynamic Surrogate Model (DrivAerML) — Interactive Demo")
 st.write(
-    "Sliders are centered on **0 offset** (baseline = dataset mean geometry). "
-    "Click **Compute** to predict coefficients and compare vs baseline."
+    "This is a fast surrogate model that predicts aerodynamic coefficients from geometry parameters. "
+    "Sliders are centered on **0 offset** (baseline = dataset mean)."
 )
 
-# Sidebar controls
+# Sidebar sliders (ONLY top K)
 with st.sidebar:
-    st.header("Geometry sliders (0 = baseline)")
+    st.header("Key geometry sliders (0 = baseline)")
+    st.caption("Only the most influential parameters are shown to keep this UI clean.")
 
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("Reset"):
-            reset_sliders(feature_cols)
-            st.rerun()
+        if st.button("Reset sliders"):
+            reset_sliders(slider_features)
+            st.rerun()  # ✅ correct in Streamlit 1.5x+
     with c2:
         compute = st.button("Compute", type="primary")
 
-    st.caption("Values shown below are absolute parameter values (baseline + offset).")
-
     params = {}
-    for col in feature_cols:
+    for col in slider_features:
         base_val = baseline[col]
         left = smin[col] - base_val
         right = smax[col] - base_val
@@ -75,91 +87,83 @@ with st.sidebar:
         offset = st.slider(col, float(left), float(right), float(st.session_state[key]), 0.001, key=key)
         params[col] = base_val + offset
 
-if compute:
-    X = pd.DataFrame([params])[feature_cols]
-    mean, std = ensemble_predict(models, X)
+# Fill non-slider features with baseline (so model always gets full feature vector)
+full_params = dict(baseline)
+full_params.update(params)
 
-    pred = {t: float(mean[0, i]) for i, t in enumerate(targets)}
-    unc = {t: float(std[0, i]) for i, t in enumerate(targets)}
-
-    # deltas vs baseline
-    delta = {t: pred[t] - baseline_outputs[t] for t in targets}
-    delta_pct = {t: pct_change(pred[t], baseline_outputs[t]) for t in targets}
-
-    colA, colB = st.columns([1.1, 0.9])
-
-    with colA:
-        st.subheader("Predictions vs baseline")
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("cd", f"{pred['cd']:.6f}", delta=f"{delta['cd']:+.6f}")
-        m2.metric("cl", f"{pred['cl']:.6f}", delta=f"{delta['cl']:+.6f}")
-        m3.metric("clf", f"{pred['clf']:.6f}", delta=f"{delta['clf']:+.6f}")
-        m4.metric("clr", f"{pred['clr']:.6f}", delta=f"{delta['clr']:+.6f}")
-
-        st.subheader("Plain-English summary")
-        # Drag: lower is better (typically)
-        cd_msg = f"Drag (cd) has {'decreased' if delta_pct['cd'] < 0 else 'increased'} by {abs(delta_pct['cd']):.2f}% (lower is typically better)."
-        cl_msg = f"Lift (cl) has {'decreased' if delta_pct['cl'] < 0 else 'increased'} by {abs(delta_pct['cl']):.2f}% vs baseline."
-        st.write(cd_msg)
-        st.write(cl_msg)
-
-        # Simple plot: baseline vs predicted bars
-        st.subheader("Baseline vs predicted (bar chart)")
-        labels = ["cd", "cl", "clf", "clr"]
-        base_vals = [baseline_outputs[t] for t in labels]
-        pred_vals = [pred[t] for t in labels]
-
-        fig = plt.figure()
-        x = np.arange(len(labels))
-        width = 0.35
-        plt.bar(x - width/2, base_vals, width, label="baseline")
-        plt.bar(x + width/2, pred_vals, width, label="predicted")
-        plt.xticks(x, labels)
-        plt.ylabel("Coefficient value")
-        plt.title("Coefficients: baseline vs predicted")
-        plt.legend()
-        plt.tight_layout()
-        st.pyplot(fig)
-
-        # Lift distribution plot (clf vs clr)
-        st.subheader("Front vs rear lift comparison")
-        fig2 = plt.figure()
-        plt.bar(["clf (front)", "clr (rear)"], [pred["clf"], pred["clr"]])
-        plt.ylabel("Coefficient value")
-        plt.title("Predicted lift distribution")
-        plt.tight_layout()
-        st.pyplot(fig2)
-
-    with colB:
-        st.subheader("Uncertainty / reliability")
-        st.write("Uncertainty here is **ensemble disagreement (std)** — lower is better.")
-
-        u1, u2, u3, u4 = st.columns(4)
-        u1.metric("cd std", f"{unc['cd']:.2e}")
-        u2.metric("cl std", f"{unc['cl']:.2e}")
-        u3.metric("clf std", f"{unc['clf']:.2e}")
-        u4.metric("clr std", f"{unc['clr']:.2e}")
-
-        # Apply your p90 thresholds only for cd/cl (we haven't calibrated clf/clr thresholds yet)
-        cd_flag = ("cd_std_p90" in thr) and (unc["cd"] > float(thr["cd_std_p90"]))
-        cl_flag = ("cl_std_p90" in thr) and (unc["cl"] > float(thr["cl_std_p90"]))
-
-        if cd_flag or cl_flag:
-            st.warning(
-                "Low confidence for at least one output (cd/cl uncertainty in top 10% of calibration set). "
-                "Recommendation: verify with CFD / higher fidelity."
-            )
-        else:
-            st.success("High confidence region (cd/cl uncertainty below p90 thresholds).")
-
-        st.caption(
-            "Note: the p90 thresholds shown are currently applied to cd/cl only. "
-            "If you want, we can calibrate thresholds for clf/clr as well."
-        )
-else:
-    st.info("Move sliders (0 = baseline) and click **Compute**.")
-
-if not (MODELS_DIR / "ui_config_4targets.json").exists():
-    st.error("Missing models/ui_config_4targets.json. Make sure it's committed to the repo.")
+if not compute:
+    st.info("Adjust sliders and click **Compute**.")
     st.stop()
 
+X = pd.DataFrame([full_params])[feature_cols]
+mean, std = ensemble_predict(models, X)
+
+pred = {t: float(mean[0, i]) for i, t in enumerate(targets)}
+unc = {t: float(std[0, i]) for i, t in enumerate(targets)}
+
+delta = {t: pred[t] - baseline_outputs[t] for t in targets}
+delta_pct = {t: pct_change(pred[t], baseline_outputs[t]) for t in targets}
+
+# Layout
+colA, colB = st.columns([1.15, 0.85])
+
+with colA:
+    st.subheader("Predictions vs baseline")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("cd", f"{pred['cd']:.6f}", delta=f"{delta['cd']:+.6f}")
+    m2.metric("cl", f"{pred['cl']:.6f}", delta=f"{delta['cl']:+.6f}")
+    m3.metric("clf", f"{pred['clf']:.6f}", delta=f"{delta['clf']:+.6f}")
+    m4.metric("clr", f"{pred['clr']:.6f}", delta=f"{delta['clr']:+.6f}")
+
+    st.subheader("Plain-English change vs baseline")
+    drag_msg = f"Drag (cd) has {'decreased' if delta_pct['cd'] < 0 else 'increased'} by {abs(delta_pct['cd']):.2f}% (lower is typically better)."
+    lift_msg = f"Lift (cl) has {'decreased' if delta_pct['cl'] < 0 else 'increased'} by {abs(delta_pct['cl']):.2f}% vs baseline."
+    st.write(drag_msg)
+    st.write(lift_msg)
+
+    # Plot 1: % change bars (nice and simple)
+    st.subheader("Change relative to baseline (%)")
+    labels = ["cd", "cl", "clf", "clr"]
+    vals = [delta_pct[t] for t in labels]
+
+    fig = plt.figure()
+    x = np.arange(len(labels))
+    plt.bar(x, vals)
+    plt.axhline(0, linewidth=1)
+    plt.xticks(x, labels)
+    plt.ylabel("% change vs baseline")
+    plt.title("Predicted change relative to baseline")
+    plt.tight_layout()
+    st.pyplot(fig)
+
+    # Plot 2: front vs rear lift distribution (absolute)
+    st.subheader("Lift distribution (front vs rear)")
+    fig2 = plt.figure()
+    plt.bar(["clf (front)", "clr (rear)"], [pred["clf"], pred["clr"]])
+    plt.ylabel("Coefficient value")
+    plt.title("Predicted lift split")
+    plt.tight_layout()
+    st.pyplot(fig2)
+
+with colB:
+    st.subheader("Uncertainty / reliability")
+    st.write("Uncertainty = ensemble disagreement (std). Lower is better.")
+
+    def row(t):
+        t_thr = float(thr.get(f"{t}_std_p90"))
+        flag = unc[t] > t_thr
+        status = "⚠️ Low" if flag else "✅ High"
+        st.write(f"**{t}**: std `{unc[t]:.2e}` vs p90 `{t_thr:.2e}` → **{status}**")
+        return flag
+
+    flags = [row(t) for t in ["cd", "cl", "clf", "clr"]]
+
+    if any(flags):
+        st.warning("Low confidence for at least one output (uncertainty above p90). Recommend CFD / higher-fidelity verification.")
+    else:
+        st.success("High confidence region (all uncertainties below p90 thresholds).")
+
+    st.caption(
+        "The p90 thresholds are computed from ensemble uncertainty on a held-out calibration split. "
+        "This is a reliability gate, not a guaranteed probability."
+    )
