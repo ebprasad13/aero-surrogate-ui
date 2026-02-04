@@ -135,10 +135,10 @@ if compute:
         st.write("Uncertainty here is **ensemble disagreement (std)** — lower is better.")
 
         u1, u2, u3, u4 = st.columns(4)
-        u1.metric("cd std", f"{unc['cd']:.2e}"")
-        u2.metric("cl std", f"{unc['cl']:.2e}"")
-        u3.metric("clf std", f"{unc['clf']:.2e}"")
-        u4.metric("clr std", f"{unc['clr']:.2e}"")
+        u1.metric("cd std", f"{unc['cd']:.2e}")
+        u2.metric("cl std", f"{unc['cl']:.2e}")
+        u3.metric("clf std", f"{unc['clf']:.2e}")
+        u4.metric("clr std", f"{unc['clr']:.2e}")
 
         # Apply your p90 thresholds only for cd/cl (we haven't calibrated clf/clr thresholds yet)
         cd_flag = ("cd_std_p90" in thr) and (unc["cd"] > float(thr["cd_std_p90"]))
