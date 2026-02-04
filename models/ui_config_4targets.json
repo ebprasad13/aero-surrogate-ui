@@ -1,0 +1,100 @@
+{
+  "feature_cols": [
+    "Vehicle_Length",
+    "Vehicle_Width",
+    "Vehicle_Height",
+    "Front_Overhang",
+    "Front_Planview",
+    "Hood_Angle",
+    "Approach_Angle",
+    "Windscreen_Angle",
+    "Greenhouse_Tapering",
+    "Backlight_Angle",
+    "Decklid_Height",
+    "Rearend_tapering",
+    "Rear_Overhang",
+    "Rear_Diffusor_Angle",
+    "Vehicle_Ride_Height",
+    "Vehicle_Pitch"
+  ],
+  "targets": [
+    "cd",
+    "cl",
+    "clf",
+    "clr"
+  ],
+  "baseline": {
+    "Vehicle_Length": 49.93583308471075,
+    "Vehicle_Width": 0.6151906710743801,
+    "Vehicle_Height": 0.1269080780991716,
+    "Front_Overhang": -25.965636152892564,
+    "Front_Planview": 0.9034326646694216,
+    "Hood_Angle": 0.05237820351239664,
+    "Approach_Angle": -5.333922526219009,
+    "Windscreen_Angle": 0.17971268595041445,
+    "Greenhouse_Tapering": 0.8375756204545466,
+    "Backlight_Angle": 50.18060776921487,
+    "Decklid_Height": -0.586821017768595,
+    "Rearend_tapering": -9.95985286216942,
+    "Rear_Overhang": -23.68495466528925,
+    "Rear_Diffusor_Angle": 0.14198853243801637,
+    "Vehicle_Ride_Height": -0.17871281239669415,
+    "Vehicle_Pitch": 0.003998794212809918
+  },
+  "slider_min": {
+    "Vehicle_Length": -130.21384999999998,
+    "Vehicle_Width": -89.42421,
+    "Vehicle_Height": -90.196595,
+    "Front_Overhang": -137.81679999999997,
+    "Front_Planview": -67.11516499999999,
+    "Hood_Angle": -45.059305,
+    "Approach_Angle": -36.474795,
+    "Windscreen_Angle": -135.06810000000002,
+    "Greenhouse_Tapering": -88.91771,
+    "Backlight_Angle": -84.307015,
+    "Decklid_Height": -45.199705,
+    "Rearend_tapering": -81.78695,
+    "Rear_Overhang": -136.8558,
+    "Rear_Diffusor_Angle": -44.919705,
+    "Vehicle_Ride_Height": -44.786805,
+    "Vehicle_Pitch": -0.8857741
+  },
+  "slider_max": {
+    "Vehicle_Length": 228.14569999999998,
+    "Vehicle_Width": 90.53670999999999,
+    "Vehicle_Height": 89.37370999999999,
+    "Front_Overhang": 86.15785499999998,
+    "Front_Planview": 67.56254999999999,
+    "Hood_Angle": 44.921105,
+    "Approach_Angle": 26.374794999999995,
+    "Windscreen_Angle": 135.45909999999998,
+    "Greenhouse_Tapering": 89.09011,
+    "Backlight_Angle": 184.4621,
+    "Decklid_Height": 44.585404999999994,
+    "Rearend_tapering": 62.447424999999996,
+    "Rear_Overhang": 87.11895499999999,
+    "Rear_Diffusor_Angle": 45.060804999999995,
+    "Vehicle_Ride_Height": 44.80300499999999,
+    "Vehicle_Pitch": 0.9021169499999999
+  },
+  "baseline_outputs": {
+    "cd": 0.278743867257494,
+    "cl": 0.03002793283374776,
+    "clf": -0.0817405073397682,
+    "clr": 0.11176844001787821
+  },
+  "baseline_uncertainty": {
+    "cd": 0.00022528375155731864,
+    "cl": 0.0006158836191410247,
+    "clf": 0.00039397658551217676,
+    "clr": 0.00037645641448509707
+  },
+  "uncertainty_thresholds": {
+    "cd_std_p90": 0.001444,
+    "cl_std_p90": 0.002911
+  },
+  "notes": {
+    "baseline_definition": "Dataset mean of geometry parameters",
+    "slider_limits": "5th\u201395th percentile of dataset"
+  }
+}
