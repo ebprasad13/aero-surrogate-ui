@@ -25,9 +25,20 @@ header[data-testid="stHeader"] { display: none; }
 #MainMenu { visibility: hidden; }
 footer { visibility: hidden; }
 
-/* Hide sidebar collapse controls (expanded + collapsed) */
+/* Hide ALL sidebar collapse / expand controls across Streamlit versions */
 button[data-testid="stSidebarCollapseButton"] { display: none !important; }
+button[data-testid="collapsedControl"] { display: none !important; }
 [data-testid="stSidebarCollapsedControl"] { display: none !important; }
+[data-testid="stSidebarNav"] button { display: none !important; }
+
+/* Extra: hide any floating chevron/controls Streamlit injects */
+div[data-testid="stSidebar"] button[aria-label*="sidebar"] { display: none !important; }
+div[data-testid="stSidebar"] button[title*="sidebar"] { display: none !important; }
+div[data-testid="stSidebar"] button[aria-label*="Collapse"] { display: none !important; }
+div[data-testid="stSidebar"] button[aria-label*="Expand"] { display: none !important; }
+
+/* As a last resort, hide the entire collapsed-control container if it exists */
+div[data-testid="stSidebarCollapsedControl"] { display: none !important; }
 
 /* Typography: Apple-ish system stack */
 html, body, [class*="css"]  {
