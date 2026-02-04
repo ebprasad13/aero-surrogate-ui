@@ -56,7 +56,7 @@ with st.sidebar:
     with c1:
         if st.button("Reset to baseline"):
             reset_sliders(feature_cols)
-            st.experimental_rerun()
+            st.rerun()
     with c2:
         compute = st.button("Compute", type="primary")
 
