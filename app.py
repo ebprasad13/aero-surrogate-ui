@@ -131,9 +131,20 @@ with colA:
     st.write(lift_msg)
 
     # Plot 1: % change bars (nice and simple)
-    st.subheader("Change relative to baseline (%)")
-    labels = ["cd", "cl", "clf", "clr"]
-    vals = [delta_pct[t] for t in labels]
+   st.subheader("Baseline vs predicted (table)")
+tbl = pd.DataFrame({
+    "baseline": [baseline_outputs[t] for t in targets],
+    "predicted": [pred[t] for t in targets],
+    "delta": [delta[t] for t in targets],
+    "delta_%": [delta_pct[t] for t in targets],
+}, index=targets)
+st.dataframe(tbl.style.format({
+    "baseline": "{:.6f}",
+    "predicted": "{:.6f}",
+    "delta": "{:+.6f}",
+    "delta_%": "{:+.2f}",
+}))
+
 
     fig = plt.figure()
     x = np.arange(len(labels))
