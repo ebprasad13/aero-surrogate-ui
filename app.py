@@ -15,23 +15,29 @@ N_MODELS = 30
 st.set_page_config(page_title="DrivAerML aero surrogate", layout="wide")
 
 # ----------------------------
-# Modern styling (simple, clean, Streamlit-safe)
+# Styling (modern dark, remove Streamlit chrome, red primary button)
 # ----------------------------
 st.markdown(
     """
 <style>
-/* Page background + typography */
+/* Hide Streamlit chrome so the gradient looks continuous */
+#MainMenu {visibility: hidden;}
+footer {visibility: hidden;}
+header {visibility: hidden;}
+[data-testid="stHeader"] {display: none;}
+[data-testid="stToolbar"] {display: none;}
+[data-testid="stDecoration"] {display: none;}
+
+/* Page background */
 .stApp {
   background: radial-gradient(1200px 800px at 20% 10%, #162033 0%, #0b0f17 55%, #070a10 100%);
   color: #e8eefc;
 }
-h1, h2, h3 { letter-spacing: -0.02em; }
-a { color: #9cc2ff; }
 
-/* Make content a bit narrower */
-.block-container { max-width: 1200px; padding-top: 2rem; }
+/* Container width/padding */
+.block-container { max-width: 1200px; padding-top: 1.6rem; }
 
-/* Card-like containers */
+/* Card styling */
 .card {
   background: rgba(255,255,255,0.06);
   border: 1px solid rgba(255,255,255,0.10);
@@ -47,7 +53,7 @@ section[data-testid="stSidebar"] {
   border-right: 1px solid rgba(255,255,255,0.08);
 }
 
-/* Buttons */
+/* Buttons default */
 .stButton>button {
   border-radius: 12px;
   padding: 0.55rem 0.9rem;
@@ -60,19 +66,26 @@ section[data-testid="stSidebar"] {
   transition: 120ms ease;
 }
 
-/* Metric styling */
-[data-testid="stMetricValue"] {
-  font-size: 1.45rem;
+/* Make the primary button (Compute) filled red */
+button[kind="primary"] {
+  background: #d32f2f !important;
+  border: 1px solid #d32f2f !important;
+  color: white !important;
 }
+button[kind="primary"]:hover {
+  background: #b71c1c !important;
+  border: 1px solid #b71c1c !important;
+}
+
+/* Metric styling */
+[data-testid="stMetricValue"] { font-size: 1.45rem; }
 </style>
 """,
     unsafe_allow_html=True,
 )
 
 # ----------------------------
-# Units and parameter display hints
-# Based on DrivAerML Table: parameters are defined as changes relative to baseline.
-# Most are in mm; vehicle pitch is in degrees. :contentReference[oaicite:1]{index=1}
+# Units (angles in degrees; lengths in mm)
 # ----------------------------
 PARAM_UNITS = {
     "Vehicle_Length": "mm",
@@ -80,17 +93,21 @@ PARAM_UNITS = {
     "Vehicle_Height": "mm",
     "Front_Overhang": "mm",
     "Front_Planview": "mm",
-    "Hood_Angle": "mm",
-    "Approach_Angle": "mm",
-    "Windscreen_Angle": "mm",
+
+    # These are angles → degrees
+    "Hood_Angle": "deg",
+    "Approach_Angle": "deg",
+    "Windscreen_Angle": "deg",
+    "Backlight_Angle": "deg",
+    "Rear_Diffusor_Angle": "deg",
+    "Vehicle_Pitch": "deg",
+
+    # These read like geometric offsets/tapers → mm (dataset naming is a bit “CAD-ish”)
     "Greenhouse_Tapering": "mm",
-    "Backlight_Angle": "mm",
     "Decklid_Height": "mm",
     "Rearend_tapering": "mm",
     "Rear_Overhang": "mm",
-    "Rear_Diffusor_Angle": "mm",   # note: spelling in your CSV is Diffusor; paper uses Diffuser :contentReference[oaicite:2]{index=2}
     "Vehicle_Ride_Height": "mm",
-    "Vehicle_Pitch": "deg",
 }
 
 def pretty_param_name(s: str) -> str:
@@ -98,8 +115,10 @@ def pretty_param_name(s: str) -> str:
 
 def fmt_with_unit(value: float, unit: str) -> str:
     if unit == "deg":
-        return f"{value:+.3f}°"
-    return f"{value:+.1f} {unit}"
+        return f"{value:+.2f}°"
+    if unit == "mm":
+        return f"{value:+.1f} mm"
+    return f"{value:+.4f}"
 
 def ensemble_predict(models, X: pd.DataFrame):
     preds = np.stack([m.predict(X) for m in models], axis=0)
@@ -135,13 +154,12 @@ def load_models_and_config():
 cfg, models = load_models_and_config()
 
 feature_cols = cfg["feature_cols"]
-slider_features = cfg.get("slider_features", feature_cols)  # should be top 8
-targets = cfg["targets"]  # expected: ["cd","cl","clf","clr"]
+slider_features = cfg.get("slider_features", feature_cols)  # top 8
+targets = cfg["targets"]  # ["cd","cl","clf","clr"]
 
-baseline = cfg["baseline"]          # baseline deltas (dataset mean); in this dataset these are *parameter values*, i.e. deltas vs baseline geometry
+baseline = cfg["baseline"]
 smin = cfg["slider_min"]
 smax = cfg["slider_max"]
-
 thr = cfg["uncertainty_thresholds"]
 baseline_outputs = cfg["baseline_outputs"]
 
@@ -152,10 +170,10 @@ st.markdown('<div class="card">', unsafe_allow_html=True)
 st.title("DrivAerML aero surrogate")
 st.markdown(
     """
-This page demonstrates a lightweight **surrogate model** trained on **DrivAerML** (500 CFD-tested DrivAer geometry variants).  
-The model is an **ensemble of Ridge regression pipelines** used to predict **cd, cl, clf, clr** from 16 geometry parameters.
+This is a lightweight **surrogate model** trained on **DrivAerML** (500 CFD-tested DrivAer geometry variants).  
+The predictor is an **ensemble of Ridge regression pipelines**, outputting **cd, cl, clf, clr** from geometry parameters.
 
-The geometry sliders below represent **changes relative to the baseline DrivAer shape** (units from the dataset paper). :contentReference[oaicite:3]{index=3}
+The sliders represent **geometry deltas relative to the baseline DrivAer shape** (with units shown per parameter).
 """,
 )
 st.markdown("</div>", unsafe_allow_html=True)
@@ -204,12 +222,15 @@ with st.sidebar:
         current_val = base_val + offset
         params[col] = current_val
 
-        # show a little “context line” under each slider
-        st.caption(f"Current setting: **{fmt_with_unit(current_val, unit)}**  ·  Range: [{fmt_with_unit(base_val+left, unit)}, {fmt_with_unit(base_val+right, unit)}]")
+        # As requested: show only the current setting (not the full range)
+        st.caption(f"Current setting: **{fmt_with_unit(current_val, unit)}**")
 
         slider_rows.append([pretty_param_name(col), fmt_with_unit(current_val, unit)])
 
-# Fill non-slider parameters with baseline so the model always gets full feature vector
+    st.divider()
+    st.caption("Built by ebprasad")  # subtle credit
+
+# Fill non-slider parameters with baseline so model always sees the full vector
 full_params = dict(baseline)
 full_params.update(params)
 
@@ -225,7 +246,6 @@ mean, std = ensemble_predict(models, X)
 
 pred = {t: float(mean[0, i]) for i, t in enumerate(targets)}
 unc = {t: float(std[0, i]) for i, t in enumerate(targets)}
-
 delta = {t: pred[t] - baseline_outputs[t] for t in targets}
 
 def is_low_conf(t):
@@ -243,15 +263,16 @@ with left:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("Predicted coefficients")
 
-    m1, m2 = st.columns(2)
-    m3, m4 = st.columns(2)
+    # Keep square layout (2x2)
+    r1c1, r1c2 = st.columns(2)
+    r2c1, r2c2 = st.columns(2)
 
-    m1.metric("cd", f"{pred['cd']:.6f}", delta=f"{delta['cd']:+.6f}")
-    m2.metric("cl", f"{pred['cl']:.6f}", delta=f"{delta['cl']:+.6f}")
-    m3.metric("clf", f"{pred['clf']:.6f}", delta=f"{delta['clf']:+.6f}")
-    m4.metric("clr", f"{pred['clr']:.6f}", delta=f"{delta['clr']:+.6f}")
+    r1c1.metric("cd", f"{pred['cd']:.6f}", delta=f"{delta['cd']:+.6f}")
+    r1c2.metric("cl", f"{pred['cl']:.6f}", delta=f"{delta['cl']:+.6f}")
+    r2c1.metric("clf", f"{pred['clf']:.6f}", delta=f"{delta['clf']:+.6f}")
+    r2c2.metric("clr", f"{pred['clr']:.6f}", delta=f"{delta['clr']:+.6f}")
 
-    st.markdown("Baseline values are the model prediction at the baseline geometry (dataset mean).")
+    st.caption("Baseline values are the model prediction at the baseline geometry (dataset mean).")
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown('<div class="card">', unsafe_allow_html=True)
@@ -290,11 +311,11 @@ with right:
     with st.expander("What do “std” and “p90” mean?", expanded=False):
         st.markdown(
             """
-- **std (standard deviation):** here it’s the *disagreement between the models* in the ensemble.  
-  If they broadly agree, std is small, which is usually reassuring.
+- **std (standard deviation):** here it’s the disagreement between the models in the ensemble.  
+  If they broadly agree, std stays small, which is usually reassuring.
 
 - **p90:** the 90th percentile of std measured on a held-out calibration split.  
-  If a prediction’s std is above p90, it’s in the most uncertain ~10% of cases, so it gets flagged.
+  If std is above p90, it’s in the most uncertain ~10% of cases, so it gets flagged.
 
 This is a practical reliability check, not a guaranteed probability.
 """
@@ -315,9 +336,13 @@ This is a practical reliability check, not a guaranteed probability.
     flags = [show_row(t) for t in ["cd", "cl", "clf", "clr"]]
 
     st.divider()
+
     if any(flags):
         st.warning("At least one output is in a higher-uncertainty region. In practice, you’d normally verify that case with CFD.")
     else:
         st.success("All outputs are below their p90 thresholds. This is a lower-uncertainty region.")
+
+    # Bring back the line you liked (native UK phrasing, not too wordy)
+    st.caption("As a rule of thumb, the ensemble tends to agree more near the baseline, and less as you push towards the edges of the dataset coverage.")
 
     st.markdown("</div>", unsafe_allow_html=True)
