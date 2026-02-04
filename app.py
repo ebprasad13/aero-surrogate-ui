@@ -158,6 +158,14 @@ def load_models_and_config():
     models = [joblib.load(p) for p in model_paths]
     return cfg, models
 
+def try_load_csv(path: Path) -> pd.DataFrame | None:
+    try:
+        if path.exists():
+            return pd.read_csv(path)
+    except Exception:
+        return None
+    return None
+
 # ----------------------------
 # Load assets
 # ----------------------------
@@ -173,8 +181,17 @@ smax = cfg["slider_max"]
 thr = cfg["uncertainty_thresholds"]
 baseline_outputs = cfg["baseline_outputs"]
 
-# Optional: show influential list if present in config; else derive from slider list
-influential_hint = cfg.get("influential_hint", slider_features)
+# Optional metadata (if you’ve added it to ui_config_4targets.json)
+split_note = cfg.get("split_note", "Group split by run (unseen geometries held out).")
+n_total = cfg.get("n_total", None)
+n_used = cfg.get("n_used", None)
+n_train = cfg.get("n_train", None)
+n_test = cfg.get("n_test", None)
+
+# Metrics files (recommended to commit under models/)
+df_final = try_load_csv(MODELS_DIR / "metrics_final_test_ridge.csv")
+df_baselines = try_load_csv(MODELS_DIR / "metrics_baselines.csv")
+df_thr = try_load_csv(MODELS_DIR / "uncertainty_thresholds_p90.csv")  # optional
 
 # ----------------------------
 # Header
@@ -235,8 +252,6 @@ with st.sidebar:
         )
         current_val = base_val + offset
         params[col] = current_val
-
-        # No “range” text; just current setting
         st.caption(f"Current setting: **{fmt_with_unit(current_val, unit)}**")
 
     st.divider()
@@ -251,20 +266,11 @@ full_params.update(params)
 # ----------------------------
 if not compute:
     left, right = st.columns([1.25, 0.75])
+
     with left:
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.subheader("Predicted coefficients")
         st.info("Adjust sliders in the sidebar, then click **Compute**.")
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.subheader("Quick notes")
-        st.markdown(
-            """
-- This is a fast screening tool for exploring trends.
-- Predictions are usually most reliable near the baseline and within the dataset’s coverage.
-"""
-        )
         st.markdown("</div>", unsafe_allow_html=True)
 
     with right:
@@ -324,17 +330,6 @@ with left:
     st.dataframe(tbl.style.format({"baseline": "{:.6f}", "predicted": "{:.6f}", "delta (absolute)": "{:+.6f}"}))
     st.markdown("</div>", unsafe_allow_html=True)
 
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("What to try next (quick suggestions)")
-    st.markdown(
-        """
-- Change one slider at a time and watch which coefficients respond most strongly.
-- If an output becomes **low confidence**, nudge parameters back towards baseline and re-check.
-- Use this as a fast *trend explorer*, then confirm any “interesting” cases with CFD in a real workflow.
-"""
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
-
 with right:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("Uncertainty / reliability")
@@ -382,37 +377,96 @@ This is a practical reliability check, not a guaranteed probability.
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ----------------------------
-# Technical notes (humble but not hiding the work)
+# Technical evaluation (numbers + things F1 reviewers look for)
 # ----------------------------
 st.markdown('<div class="card">', unsafe_allow_html=True)
-st.subheader("Technical notes (for the curious)")
+st.subheader("Technical evaluation (model card)")
 
+# Key facts that reviewers care about
+st.markdown("**Model**")
 st.markdown(
-    """
-This demo is intended as a lightweight *surrogate* — useful for fast iteration and intuition, not a substitute for CFD sign-off.
-
-**Training**
-- Model: an **ensemble of Ridge regression pipelines** (linear model with L2 regularisation).
-- Inputs: DrivAerML geometry parameters (a compact set of physically meaningful shape variables).
-- Outputs: **cd, cl, clf, clr** from time-averaged CFD forces (constant reference values).
-
-**Validation**
-- Evaluation is designed to reflect **unseen runs**, rather than random shuffles, to avoid overly optimistic results.
-- In the project repo, results are supported by predicted-vs-actual plots and error distributions.
-
-**Reliability**
-- The uncertainty shown here is **ensemble disagreement (std)** — a practical indicator of when the model is being pushed beyond familiar patterns.
-- The **p90 threshold** flags the most uncertain ~10% of cases based on a held-out calibration split.
-
-**Limitations**
-- Like most surrogates, it is strongest at **interpolation** (within dataset coverage) and weaker for aggressive extrapolation.
-- For engineering decisions, treat it as a fast screening tool and verify important cases with higher fidelity.
+    f"""
+- Ensemble size: **{N_MODELS}** (Ridge regression pipelines)
+- Features: **{len(feature_cols)}** geometry parameters
+- Targets: **{', '.join(targets)}**
+- Split / leakage control: **{split_note}**
 """
 )
 
-# Optional small sensitivity hint (kept humble)
-st.markdown("**Most-influential parameters shown in this demo**")
-st.write(", ".join([pretty_param_name(x) for x in influential_hint]))
+# Dataset / usage counts (if you populated them in ui_config; otherwise we compute what we can)
+meta_bits = []
+if n_total is not None:
+    meta_bits.append(f"Total geometries (nominal): **{n_total}**")
+if n_used is not None:
+    meta_bits.append(f"Used for modelling: **{n_used}**")
+if n_train is not None:
+    meta_bits.append(f"Train: **{n_train}**")
+if n_test is not None:
+    meta_bits.append(f"Test: **{n_test}**")
 
-st.caption("Built by ebprasad · DrivAerML dataset by N. Ashton et al. (see dataset citation in the repo)")
+if meta_bits:
+    st.markdown("**Data**")
+    st.markdown("- " + "\n- ".join(meta_bits))
+
+# Show your real final test metrics (R2/RMSE etc)
+st.markdown("**Final test performance**")
+
+if df_final is None:
+    st.warning(
+        "No `models/metrics_final_test_ridge.csv` found in the deployed repo. "
+        "Commit that file to `models/` to display R² / RMSE here."
+    )
+else:
+    # Expecting columns like: target, split, model, r2, rmse, mae ... (we’ll display what exists)
+    # Make it robust by selecting common columns if present
+    cols_prefer = [c for c in ["target", "r2", "rmse", "mae", "mape", "n"] if c in df_final.columns]
+    if not cols_prefer:
+        st.write(df_final)
+    else:
+        view = df_final[cols_prefer].copy()
+
+        # Nice formatting
+        fmt = {}
+        if "r2" in view.columns:
+            fmt["r2"] = "{:.4f}"
+        if "rmse" in view.columns:
+            fmt["rmse"] = "{:.6f}"
+        if "mae" in view.columns:
+            fmt["mae"] = "{:.6f}"
+        if "mape" in view.columns:
+            fmt["mape"] = "{:.2f}%"
+
+        st.dataframe(view.style.format(fmt))
+
+        # Quick textual summary (technical, not fluffy)
+        if "r2" in view.columns and "rmse" in view.columns and "target" in view.columns:
+            best = view.sort_values("r2", ascending=False).iloc[0]
+            worst = view.sort_values("r2", ascending=True).iloc[0]
+            st.caption(
+                f"Best R²: {best['target']} = {best['r2']:.4f} (RMSE {best['rmse']:.6f}) · "
+                f"Weakest R²: {worst['target']} = {worst['r2']:.4f} (RMSE {worst['rmse']:.6f})."
+            )
+
+# Optional: show baseline comparison table if present
+with st.expander("Baselines and comparisons (optional)", expanded=False):
+    if df_baselines is None:
+        st.info("Commit `models/metrics_baselines.csv` to show baseline model comparisons here.")
+    else:
+        st.dataframe(df_baselines)
+
+    if df_thr is None:
+        st.info("Commit `models/uncertainty_thresholds_p90.csv` if you’d like the calibrated p90 thresholds shown as a table.")
+    else:
+        st.dataframe(df_thr)
+
+st.markdown("**Engineering interpretation / limitations**")
+st.markdown(
+    """
+- This surrogate is intended for **rapid screening** and **trend exploration**. Any design decision should be verified with higher fidelity when it matters.
+- Expected failure mode: **extrapolation** (inputs near/outside training coverage) — which is why the app surfaces an ensemble-disagreement flag.
+- The uncertainty here is **model disagreement**, not epistemic certainty in a strict probabilistic sense; it is used as a pragmatic “trust but verify” indicator.
+"""
+)
+
+st.caption("Built by ebprasad · DrivAerML dataset by N. Ashton et al. (citation in the repo)")
 st.markdown("</div>", unsafe_allow_html=True)
