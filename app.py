@@ -77,14 +77,11 @@ st.title("DrivAerML Aero Surrogate — Interactive Coefficient Predictor")
 
 st.markdown(
     """
-**What this is:** a fast *surrogate model* trained on the **DrivAerML** dataset  
-(500 parametrically-morphed DrivAer notchback geometries with high-fidelity CFD force coefficients).
+**What this is:** A fast *surrogate model* trained on the **DrivAerML** dataset (500 parametrically-morphed DrivAer notchback geometries with high-fidelity CFD force coefficients).
 
-**Model:** an **ensemble of Ridge Regression models** (linear model with L2 regularisation), predicting  
-**cd, cl, clf, clr** from geometry parameters.
+**Model:** An **ensemble of Ridge Regression models** (linear model with L2 regularisation), predicting **cd, cl, clf, clr** from geometry parameters.
 
-**How to use it:** sliders adjust key geometry parameters around a reference (“baseline”) geometry  
-(here: the **dataset mean**). Click **Compute** to see predicted coefficients and a comparison vs baseline.
+**How to use it:** Sliders adjust key geometry parameters around a reference (“baseline”) geometry (here: the **dataset mean**). Click **Compute** to see predicted coefficients and a comparison vs baseline.
 """
 )
 
