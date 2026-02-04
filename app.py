@@ -25,20 +25,24 @@ header[data-testid="stHeader"] { display: none; }
 #MainMenu { visibility: hidden; }
 footer { visibility: hidden; }
 
-/* Hide ALL sidebar collapse / expand controls across Streamlit versions */
+/* --- Lock sidebar open (Streamlit 1.54+) --- */
+
+/* Hide the collapse/expand chevron button (new + old testids) */
 button[data-testid="stSidebarCollapseButton"] { display: none !important; }
 button[data-testid="collapsedControl"] { display: none !important; }
-[data-testid="stSidebarCollapsedControl"] { display: none !important; }
-[data-testid="stSidebarNav"] button { display: none !important; }
-
-/* Extra: hide any floating chevron/controls Streamlit injects */
-div[data-testid="stSidebar"] button[aria-label*="sidebar"] { display: none !important; }
-div[data-testid="stSidebar"] button[title*="sidebar"] { display: none !important; }
-div[data-testid="stSidebar"] button[aria-label*="Collapse"] { display: none !important; }
-div[data-testid="stSidebar"] button[aria-label*="Expand"] { display: none !important; }
-
-/* As a last resort, hide the entire collapsed-control container if it exists */
+div[data-testid="collapsedControl"] { display: none !important; }
 div[data-testid="stSidebarCollapsedControl"] { display: none !important; }
+[data-testid="stSidebarCollapsedControl"] { display: none !important; }
+
+/* Hide any button that looks like the sidebar toggle (covers aria-label variants) */
+button[aria-label="Collapse sidebar"] { display: none !important; }
+button[aria-label="Expand sidebar"] { display: none !important; }
+button[title="Collapse sidebar"] { display: none !important; }
+button[title="Expand sidebar"] { display: none !important; }
+
+/* Streamlit sometimes renders the toggle inside the header area even if header is hidden */
+header button[aria-label*="sidebar" i] { display: none !important; }
+header button[title*="sidebar" i] { display: none !important; }
 
 /* Typography: Apple-ish system stack */
 html, body, [class*="css"]  {
