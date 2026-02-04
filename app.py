@@ -20,7 +20,7 @@ st.set_page_config(page_title="DrivAerML aero surrogate — demo", layout="wide"
 st.markdown(
     """
 <style>
-/* Hide Streamlit header + menus (removes the top bar region) */
+Hide Streamlit header + menus (removes the top bar region)
 header[data-testid="stHeader"] { display: none; }
 #MainMenu { visibility: hidden; }
 footer { visibility: hidden; }
