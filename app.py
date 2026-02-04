@@ -12,21 +12,30 @@ import streamlit as st
 MODELS_DIR = Path("models")
 N_MODELS = 30
 
-st.set_page_config(page_title="DrivAerML aero surrogate", layout="wide")
+st.set_page_config(page_title="DrivAerML aero surrogate — demo", layout="wide")
 
 # ----------------------------
-# Styling (modern dark, remove Streamlit chrome, red primary button)
+# Styling (keep sidebar + collapsed toggle visible)
 # ----------------------------
 st.markdown(
     """
 <style>
-/* Hide Streamlit chrome so the gradient looks continuous */
 #MainMenu {visibility: hidden;}
 footer {visibility: hidden;}
-header {visibility: hidden;}
-[data-testid="stHeader"] {display: none;}
-[data-testid="stToolbar"] {display: none;}
-[data-testid="stDecoration"] {display: none;}
+
+/* IMPORTANT: do not hide the Streamlit header entirely.
+   Hiding it can remove the built-in sidebar show/hide affordance on some builds. */
+
+/* Keep the “show sidebar” control visible when sidebar is collapsed */
+[data-testid="stSidebarCollapsedControl"] {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  position: fixed !important;
+  top: 0.9rem !important;
+  left: 0.9rem !important;
+  z-index: 10000 !important;
+}
 
 /* Page background */
 .stApp {
@@ -53,7 +62,7 @@ section[data-testid="stSidebar"] {
   border-right: 1px solid rgba(255,255,255,0.08);
 }
 
-/* Buttons default */
+/* Buttons */
 .stButton>button {
   border-radius: 12px;
   padding: 0.55rem 0.9rem;
@@ -66,7 +75,7 @@ section[data-testid="stSidebar"] {
   transition: 120ms ease;
 }
 
-/* Make the primary button (Compute) filled red */
+/* Filled red primary button */
 button[kind="primary"] {
   background: #d32f2f !important;
   border: 1px solid #d32f2f !important;
@@ -92,9 +101,9 @@ PARAM_UNITS = {
     "Vehicle_Width": "mm",
     "Vehicle_Height": "mm",
     "Front_Overhang": "mm",
-    "Front_Planview": "mm",
+    "Rear_Overhang": "mm",
+    "Vehicle_Ride_Height": "mm",
 
-    # These are angles → degrees
     "Hood_Angle": "deg",
     "Approach_Angle": "deg",
     "Windscreen_Angle": "deg",
@@ -102,14 +111,15 @@ PARAM_UNITS = {
     "Rear_Diffusor_Angle": "deg",
     "Vehicle_Pitch": "deg",
 
-    # These read like geometric offsets/tapers → mm (dataset naming is a bit “CAD-ish”)
+    "Front_Planview": "mm",
     "Greenhouse_Tapering": "mm",
     "Decklid_Height": "mm",
     "Rearend_tapering": "mm",
-    "Rear_Overhang": "mm",
-    "Vehicle_Ride_Height": "mm",
 }
 
+# ----------------------------
+# Helpers
+# ----------------------------
 def pretty_param_name(s: str) -> str:
     return s.replace("_", " ")
 
@@ -119,6 +129,11 @@ def fmt_with_unit(value: float, unit: str) -> str:
     if unit == "mm":
         return f"{value:+.1f} mm"
     return f"{value:+.4f}"
+
+def pct_change(new, base):
+    if base == 0:
+        return np.nan
+    return (new - base) / abs(base) * 100.0
 
 def ensemble_predict(models, X: pd.DataFrame):
     preds = np.stack([m.predict(X) for m in models], axis=0)
@@ -167,19 +182,23 @@ baseline_outputs = cfg["baseline_outputs"]
 # Header
 # ----------------------------
 st.markdown('<div class="card">', unsafe_allow_html=True)
-st.title("DrivAerML aero surrogate")
+st.title("DrivAerML aero surrogate — demo")
 st.markdown(
     """
-This is a lightweight **surrogate model** trained on **DrivAerML** (500 CFD-tested DrivAer geometry variants).  
-The predictor is an **ensemble of Ridge regression pipelines**, outputting **cd, cl, clf, clr** from geometry parameters.
+**What this demo does**
+- Predicts **cd, cl, clf, clr** from a small set of geometry parameters.
 
-The sliders represent **geometry deltas relative to the baseline DrivAer shape** (with units shown per parameter).
-""",
+**How it works**
+- Uses an **ensemble of Ridge regression pipelines** trained on **DrivAerML** (500 CFD-tested DrivAer variants).
+
+**How to read the sliders**
+- Slider values are **geometry deltas (Δ)** relative to the baseline DrivAer shape, with units shown per parameter.
+"""
 )
 st.markdown("</div>", unsafe_allow_html=True)
 
 # ----------------------------
-# Sidebar controls
+# Sidebar controls (only)
 # ----------------------------
 with st.sidebar:
     st.header("Controls")
@@ -198,8 +217,6 @@ with st.sidebar:
     st.caption("Values shown are deltas (Δ) relative to the baseline geometry.")
 
     params = {}
-    slider_rows = []
-
     for col in slider_features:
         unit = PARAM_UNITS.get(col, "")
         base_val = float(baseline[col])
@@ -218,22 +235,22 @@ with st.sidebar:
             0.001,
             key=key,
         )
-
         current_val = base_val + offset
         params[col] = current_val
 
-        # As requested: show only the current setting (not the full range)
+        # No “range” text; just current setting
         st.caption(f"Current setting: **{fmt_with_unit(current_val, unit)}**")
 
-        slider_rows.append([pretty_param_name(col), fmt_with_unit(current_val, unit)])
-
     st.divider()
-    st.caption("Built by ebprasad")  # subtle credit
+    st.caption("Built by ebprasad")
 
-# Fill non-slider parameters with baseline so model always sees the full vector
+# Fill non-slider parameters with baseline
 full_params = dict(baseline)
 full_params.update(params)
 
+# ----------------------------
+# If not computed yet, show instruction and stop
+# ----------------------------
 if not compute:
     st.info("Adjust sliders in the sidebar, then click **Compute**.")
     st.stop()
@@ -246,13 +263,9 @@ mean, std = ensemble_predict(models, X)
 
 pred = {t: float(mean[0, i]) for i, t in enumerate(targets)}
 unc = {t: float(std[0, i]) for i, t in enumerate(targets)}
-delta = {t: pred[t] - baseline_outputs[t] for t in targets}
 
-def is_low_conf(t):
-    thr_val = float(thr.get(f"{t}_std_p90", np.nan))
-    if np.isnan(thr_val):
-        return False
-    return unc[t] > thr_val
+delta_abs = {t: pred[t] - baseline_outputs[t] for t in targets}
+delta_pct = {t: pct_change(pred[t], baseline_outputs[t]) for t in targets}
 
 # ----------------------------
 # Main layout
@@ -263,14 +276,14 @@ with left:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("Predicted coefficients")
 
-    # Keep square layout (2x2)
+    # 2x2 layout with % deltas
     r1c1, r1c2 = st.columns(2)
     r2c1, r2c2 = st.columns(2)
 
-    r1c1.metric("cd", f"{pred['cd']:.6f}", delta=f"{delta['cd']:+.6f}")
-    r1c2.metric("cl", f"{pred['cl']:.6f}", delta=f"{delta['cl']:+.6f}")
-    r2c1.metric("clf", f"{pred['clf']:.6f}", delta=f"{delta['clf']:+.6f}")
-    r2c2.metric("clr", f"{pred['clr']:.6f}", delta=f"{delta['clr']:+.6f}")
+    r1c1.metric("cd", f"{pred['cd']:.6f}", delta=f"{delta_pct['cd']:+.2f}%")
+    r1c2.metric("cl", f"{pred['cl']:.6f}", delta=f"{delta_pct['cl']:+.2f}%")
+    r2c1.metric("clf", f"{pred['clf']:.6f}", delta=f"{delta_pct['clf']:+.2f}%")
+    r2c2.metric("clr", f"{pred['clr']:.6f}", delta=f"{delta_pct['clr']:+.2f}%")
 
     st.caption("Baseline values are the model prediction at the baseline geometry (dataset mean).")
     st.markdown("</div>", unsafe_allow_html=True)
@@ -282,26 +295,11 @@ with left:
         {
             "baseline": [baseline_outputs[t] for t in targets],
             "predicted": [pred[t] for t in targets],
-            "delta": [delta[t] for t in targets],
+            "delta (absolute)": [delta_abs[t] for t in targets],
         },
         index=targets,
     )
-    st.dataframe(
-        tbl.style.format(
-            {
-                "baseline": "{:.6f}",
-                "predicted": "{:.6f}",
-                "delta": "{:+.6f}",
-            }
-        )
-    )
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("Parameter settings (shown sliders)")
-    st.caption("These are the 8 displayed geometry deltas used for this prediction.")
-    param_tbl = pd.DataFrame(slider_rows, columns=["Parameter", "Current Δ setting"])
-    st.dataframe(param_tbl, hide_index=True)
+    st.dataframe(tbl.style.format({"baseline": "{:.6f}", "predicted": "{:.6f}", "delta (absolute)": "{:+.6f}"}))
     st.markdown("</div>", unsafe_allow_html=True)
 
 with right:
@@ -311,15 +309,21 @@ with right:
     with st.expander("What do “std” and “p90” mean?", expanded=False):
         st.markdown(
             """
-- **std (standard deviation):** here it’s the disagreement between the models in the ensemble.  
-  If they broadly agree, std stays small, which is usually reassuring.
+- **std (standard deviation):** Here it represents disagreement between models in the ensemble.  
+  If they broadly agree, the std stays small, which is usually reassuring.
 
-- **p90:** the 90th percentile of std measured on a held-out calibration split.  
-  If std is above p90, it’s in the most uncertain ~10% of cases, so it gets flagged.
+- **p90:** The 90th percentile of std measured on a held-out calibration split.  
+  If std is above p90, the prediction falls into the most uncertain ~10% of cases, so it is flagged.
 
 This is a practical reliability check, not a guaranteed probability.
 """
         )
+
+    def is_low_conf(t):
+        thr_val = float(thr.get(f"{t}_std_p90", np.nan))
+        if np.isnan(thr_val):
+            return False
+        return unc[t] > thr_val
 
     def show_row(t):
         thr_val = float(thr.get(f"{t}_std_p90", np.nan))
@@ -330,19 +334,15 @@ This is a practical reliability check, not a guaranteed probability.
             st.write(f"**{t}**: std `{unc[t]:.2e}` → **{status}**")
         else:
             st.write(f"**{t}**: std `{unc[t]:.2e}` vs p90 `{thr_val:.2e}` → **{status}**")
-
         return flagged
 
     flags = [show_row(t) for t in ["cd", "cl", "clf", "clr"]]
 
     st.divider()
-
     if any(flags):
         st.warning("At least one output is in a higher-uncertainty region. In practice, you’d normally verify that case with CFD.")
     else:
         st.success("All outputs are below their p90 thresholds. This is a lower-uncertainty region.")
 
-    # Bring back the line you liked (native UK phrasing, not too wordy)
-    st.caption("As a rule of thumb, the ensemble tends to agree more near the baseline, and less as you push towards the edges of the dataset coverage.")
-
+    st.caption("As a rule of thumb, the ensemble tends to agree more near the baseline, and less as you push towards the edges of dataset coverage.")
     st.markdown("</div>", unsafe_allow_html=True)
