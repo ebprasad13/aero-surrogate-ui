@@ -55,10 +55,19 @@ smax = cfg["slider_max"]
 thr = cfg["uncertainty_thresholds"]
 baseline_outputs = cfg["baseline_outputs"]
 
-st.title("Aerodynamic Surrogate Model (DrivAerML) — Interactive Demo")
-st.write(
-    "This is a fast surrogate model that predicts aerodynamic coefficients from geometry parameters. "
-    "Sliders are centered on **0 offset** (baseline = dataset mean)."
+st.title("DrivAerML Aero Surrogate — Interactive Coefficient Predictor")
+
+st.markdown(
+    """
+**What you’re seeing:** a lightweight *surrogate model* trained on the **DrivAerML** dataset  
+(500 parametrically-morphed DrivAer notchback geometries with high-fidelity CFD force coefficients).
+
+**Model:** an **ensemble of Ridge Regression models** (linear model with L2 regularisation) trained on
+geometry parameters to predict **cd, cl, clf, clr**.
+
+**How to use:** sliders apply an offset around a reference (“baseline”) geometry (here: **dataset mean**).
+Click **Compute** to predict coefficients and compare against baseline.
+"""
 )
 
 # Sidebar sliders (ONLY top K)
