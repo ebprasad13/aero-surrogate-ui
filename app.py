@@ -161,17 +161,28 @@ with left:
     m4.metric("clr", f"{pred['clr']:.6f}", delta=f"{delta['clr']:+.6f}")
 
     st.subheader("Engineering summary (vs baseline)")
-    drag_msg = (
-        f"Drag (cd) has {'gone down' if delta_pct['cd'] < 0 else 'gone up'} by "
-        f"{abs(delta_pct['cd']):.2f}% compared with baseline "
-        f"({'usually a good thing' if delta_pct['cd'] < 0 else 'usually not ideal'})."
-    )
-    lift_msg = (
-        f"Lift (cl) has {'gone down' if delta_pct['cl'] < 0 else 'gone up'} by "
-        f"{abs(delta_pct['cl']):.2f}% compared with baseline."
-    )
-    st.write(drag_msg)
-    st.write(lift_msg)
+
+cd_low = unc["cd"] > float(thr["cd_std_p90"])
+cl_low = unc["cl"] > float(thr["cl_std_p90"])
+clf_low = unc["clf"] > float(thr["clf_std_p90"])
+clr_low = unc["clr"] > float(thr["clr_std_p90"])
+
+st.markdown("**Drag (cd)**")
+st.write(make_statement("drag coefficient (cd)", delta["cd"], delta_pct["cd"], cd_low,
+                        plain="Lower drag usually helps efficiency and top speed."))
+
+st.markdown("**Lift (cl)**")
+st.write(make_statement("lift coefficient (cl)", delta["cl"], delta_pct["cl"], cl_low,
+                        plain="Interpretation depends on the sign convention used for lift/downforce."))
+
+st.markdown("**Front lift (clf)**")
+st.write(make_statement("front lift coefficient (clf)", delta["clf"], delta_pct["clf"], clf_low,
+                        plain="Changes here influence front aero balance."))
+
+st.markdown("**Rear lift (clr)**")
+st.write(make_statement("rear lift coefficient (clr)", delta["clr"], delta_pct["clr"], clr_low,
+                        plain="Changes here influence rear aero balance."))
+
 
     st.subheader("Baseline vs predicted (table)")
     tbl = pd.DataFrame(
@@ -268,3 +279,67 @@ This is a practical reliability check — not a guaranteed probability.
     st.caption(
         "Tip: The uncertainty tends to be lowest near the baseline and higher near the edge of the dataset coverage."
     )
+
+import random
+
+OPENERS = [
+    "From what I can see,",
+    "Based on the current inputs,",
+    "Looking at the outputs,",
+    "The results suggest",
+    "It appears",
+    "On this run,",
+    "This configuration indicates",
+    "From the model’s prediction,",
+]
+
+TRUST_HIGH = [
+    "This sits in a lower-uncertainty region, so I’d treat it as fairly reliable.",
+    "Uncertainty is below the p90 threshold, so this looks like a confident prediction.",
+    "The ensemble agreement is good here, which is reassuring.",
+    "This is within the model’s comfort zone (low disagreement across the ensemble).",
+]
+
+TRUST_LOW = [
+    "Uncertainty is above the p90 threshold, so I’d treat this as a higher-risk estimate and verify with CFD if it matters.",
+    "This falls into a higher-uncertainty region — I wouldn’t rely on it without a cross-check.",
+    "The ensemble disagreement is relatively high here, so I’d recommend a verification step.",
+    "This is edging towards the limits of what the model has seen — consider it indicative rather than definitive.",
+]
+
+TEMPLATES_GENERIC = [
+    "{opener} the vehicle’s {metric} {direction} {pct}. {trust}",
+    "{opener} {metric} {direction} {pct} relative to baseline (Δ={abs}). {trust}",
+    "{opener} I’m seeing a {direction_word} in {metric}: {pct}. {trust}",
+    "{opener} compared with baseline, {metric} {direction} {pct}. {trust}",
+    "{opener} {metric} {direction} {pct}; the uncertainty check says: {trust}",
+    "{opener} the predicted {metric} {direction} {pct} (Δ={abs}). {trust}",
+    "{opener} {metric} has shifted {direction_word}: {pct}. {trust}",
+]
+
+def make_statement(metric_name: str, delta_abs: float, delta_pct: float, is_low_conf: bool, plain: str | None = None):
+    opener = random.choice(OPENERS)
+    trust = random.choice(TRUST_LOW if is_low_conf else TRUST_HIGH)
+
+    direction = "has decreased by" if delta_pct < 0 else "has increased by"
+    direction_word = "reduction" if delta_pct < 0 else "increase"
+
+    pct_str = f"{abs(delta_pct):.2f}%"
+    abs_str = f"{delta_abs:+.6f}"
+
+    template = random.choice(TEMPLATES_GENERIC)
+
+    # Optional extra context
+    if plain and random.random() < 0.35:
+        template = template + f" ({plain})"
+
+    return template.format(
+        opener=opener,
+        metric=metric_name,
+        direction=direction,
+        direction_word=direction_word,
+        pct=pct_str,
+        abs=abs_str,
+        trust=trust,
+    )
+
