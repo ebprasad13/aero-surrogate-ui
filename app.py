@@ -15,34 +15,15 @@ N_MODELS = 30
 st.set_page_config(page_title="DrivAerML aero surrogate — demo", layout="wide")
 
 # ============================================================
-# Styling (hide header bar + lock sidebar open + modern theme)
+# Styling (modern theme + hide header + floating controls)
 # ============================================================
 st.markdown(
     """
 <style>
-/* Hide Streamlit header (removes the top bar) + menus */
+/* Hide Streamlit header + menus (removes the top bar region) */
 header[data-testid="stHeader"] { display: none; }
 #MainMenu { visibility: hidden; }
 footer { visibility: hidden; }
-
-/* --- Lock sidebar open (Streamlit 1.54+) --- */
-
-/* Hide the collapse/expand chevron button (new + old testids) */
-button[data-testid="stSidebarCollapseButton"] { display: none !important; }
-button[data-testid="collapsedControl"] { display: none !important; }
-div[data-testid="collapsedControl"] { display: none !important; }
-div[data-testid="stSidebarCollapsedControl"] { display: none !important; }
-[data-testid="stSidebarCollapsedControl"] { display: none !important; }
-
-/* Hide any button that looks like the sidebar toggle (covers aria-label variants) */
-button[aria-label="Collapse sidebar"] { display: none !important; }
-button[aria-label="Expand sidebar"] { display: none !important; }
-button[title="Collapse sidebar"] { display: none !important; }
-button[title="Expand sidebar"] { display: none !important; }
-
-/* Streamlit sometimes renders the toggle inside the header area even if header is hidden */
-header button[aria-label*="sidebar" i] { display: none !important; }
-header button[title*="sidebar" i] { display: none !important; }
 
 /* Typography: Apple-ish system stack */
 html, body, [class*="css"]  {
@@ -125,12 +106,8 @@ button[kind="primary"]:hover { filter: brightness(0.96); }
   margin-bottom: 10px;
 }
 .small-muted { color: rgba(238,242,255,0.70); font-size: 0.92rem; }
-</style>
-""",
-    unsafe_allow_html=True,
-)
 
-/* Floating Controls toggle button */
+/* Floating controls toggle button (always reachable) */
 .fixed-controls {
   position: fixed;
   top: 18px;
@@ -143,6 +120,10 @@ button[kind="primary"]:hover { filter: brightness(0.96); }
   backdrop-filter: blur(10px);
   box-shadow: 0 14px 40px rgba(0,0,0,0.30);
 }
+</style>
+""",
+    unsafe_allow_html=True,
+)
 
 # ============================================================
 # Units (angles in deg; lengths in mm — sensible defaults)
@@ -178,13 +159,6 @@ def fmt_value(value: float, unit: str) -> str:
     if unit == "mm":
         return f"{value:.1f} mm"
     return f"{value:.4f}"
-
-def fmt_delta(value: float, unit: str) -> str:
-    if unit == "deg":
-        return f"{value:+.2f}°"
-    if unit == "mm":
-        return f"{value:+.1f} mm"
-    return f"{value:+.4f}"
 
 def pct_change(new, base):
     if base == 0:
@@ -228,27 +202,16 @@ def try_load_csv(path: Path) -> pd.DataFrame | None:
     return None
 
 def normalise_final_metrics(df: pd.DataFrame | None) -> pd.DataFrame | None:
-    """
-    Expect either:
-      target, test_MAE, test_RMSE, test_R2
-    or:
-      target, MAE, RMSE, R2
-    """
     if df is None or df.empty:
         return df
-
     df = df.copy()
     df.columns = [c.strip() for c in df.columns]
-
     if "test_MAE" in df.columns:
         df = df.rename(columns={"test_MAE": "MAE", "test_RMSE": "RMSE", "test_R2": "R2"})
-
-    # Keep only key columns if present
     keep = [c for c in ["target", "MAE", "RMSE", "R2"] if c in df.columns]
-    if not keep or "target" not in keep:
-        return df  # fallback if schema is unexpected
-    df = df[keep]
-    return df
+    if "target" not in keep:
+        return df
+    return df[keep]
 
 def summarise_range(series: pd.Series, fmt: str) -> str:
     vmin = float(series.min())
@@ -256,27 +219,24 @@ def summarise_range(series: pd.Series, fmt: str) -> str:
     return f"{fmt.format(vmin)}–{fmt.format(vmax)}"
 
 def make_compact_baseline_table(df_baselines: pd.DataFrame, targets: list[str]) -> pd.DataFrame:
-    """
-    Compact comparison: best RMSE model per target + Ridge (closest ridge entry).
-    Assumes columns: model, target, MAE, RMSE, R2
-    """
     df = df_baselines.copy()
     for c in ["MAE", "RMSE", "R2"]:
-        df[c] = df[c].astype(float)
+        if c in df.columns:
+            df[c] = df[c].astype(float)
 
     best = (
         df.sort_values(["target", "RMSE"], ascending=[True, True])
-          .groupby("target", as_index=False)
-          .head(1)
-          .rename(columns={"model": "best_model", "RMSE": "best_RMSE", "R2": "best_R2"})
+        .groupby("target", as_index=False)
+        .head(1)
+        .rename(columns={"model": "best_model", "RMSE": "best_RMSE", "R2": "best_R2"})
     )[["target", "best_model", "best_RMSE", "best_R2"]]
 
     ridge = df[df["model"].str.contains("ridge", case=False, na=False)].copy()
     ridge = (
         ridge.sort_values(["target", "RMSE"])
-             .groupby("target", as_index=False)
-             .head(1)
-             .rename(columns={"RMSE": "ridge_RMSE", "R2": "ridge_R2"})
+        .groupby("target", as_index=False)
+        .head(1)
+        .rename(columns={"RMSE": "ridge_RMSE", "R2": "ridge_R2"})
     )[["target", "ridge_RMSE", "ridge_R2"]]
 
     out = best.merge(ridge, on="target", how="left")
@@ -289,30 +249,28 @@ def make_compact_baseline_table(df_baselines: pd.DataFrame, targets: list[str]) 
 cfg, models = load_models_and_config()
 
 feature_cols = cfg["feature_cols"]
-slider_features = cfg.get("slider_features", feature_cols)  # top 8 (you set this in config)
+slider_features = cfg.get("slider_features", feature_cols)  # top 8
 targets = cfg["targets"]  # ["cd","cl","clf","clr"]
-
-# --- Controls panel state (works even if the sidebar is collapsed) ---
-if "show_controls_panel" not in st.session_state:
-    st.session_state.show_controls_panel = True
 
 baseline = cfg["baseline"]
 smin = cfg["slider_min"]
 smax = cfg["slider_max"]
 
-thr = cfg.get("uncertainty_thresholds", {})  # expects *_std_p90 for cd/cl/clf/clr
+thr = cfg.get("uncertainty_thresholds", {})
 baseline_outputs = cfg["baseline_outputs"]
 
-# Optional extra metadata in config
 split_note = cfg.get("split_note", "Group split by run (unseen geometries held out).")
 n_used = cfg.get("n_used", None)
 n_train = cfg.get("n_train", None)
 n_test = cfg.get("n_test", None)
 
-# Metrics CSVs (commit under models/)
 df_final = normalise_final_metrics(try_load_csv(MODELS_DIR / "metrics_final_test_ridge.csv"))
 df_base = try_load_csv(MODELS_DIR / "metrics_baselines.csv")
 df_thr_csv = try_load_csv(MODELS_DIR / "uncertainty_thresholds_p90.csv")
+
+# Controls panel state (recovery panel if sidebar is collapsed)
+if "show_controls_panel" not in st.session_state:
+    st.session_state.show_controls_panel = True
 
 # ============================================================
 # Header
@@ -322,10 +280,10 @@ st.title("DrivAerML aero surrogate — demo")
 st.markdown(
     """
 **What this demo does**
-- Predicts **cd, cl, clf, clr** from a compact set of geometry parameters.
+- Predicts **cd, cl, clf, clr** from geometry parameters.
 
 **How it works**
-- Runs an **ensemble of Ridge regression pipelines** trained on **DrivAerML** (500 CFD-tested DrivAer geometry variants).
+- Uses an **ensemble of Ridge regression pipelines** trained on **DrivAerML** (500 CFD-tested DrivAer geometry variants).
 
 **How to read the sliders**
 - Slider values are **geometry deltas (Δ)** relative to the baseline DrivAer shape.
@@ -334,91 +292,79 @@ st.markdown(
 st.markdown("</div>", unsafe_allow_html=True)
 
 # ============================================================
-# Sidebar (ALL parameters; top 8 highlighted)
+# Slider builder (shared)
 # ============================================================
-def slider_for(col: str, params_out: dict):
+def add_slider(col: str, params_out: dict, widget_suffix: str = ""):
     unit = PARAM_UNITS.get(col, "")
     base_val = float(baseline[col])
     left = float(smin[col] - base_val)
     right = float(smax[col] - base_val)
 
-    key = f"off_{col}"
-    if key not in st.session_state:
-        st.session_state[key] = 0.0
+    state_key = f"off_{col}"
+    widget_key = f"{state_key}{widget_suffix}"
+
+    if state_key not in st.session_state:
+        st.session_state[state_key] = 0.0
 
     offset = st.slider(
         f"{pretty_param_name(col)} ({unit})" if unit else pretty_param_name(col),
-        left,
-        right,
-        float(st.session_state[key]),
+        left, right,
+        float(st.session_state[state_key]),
         0.001,
-        key=key,
+        key=widget_key,
     )
-    current_val = base_val + offset
-    params_out[col] = current_val
 
-    # show current value only (no "range" copy)
-    st.caption(f"Current setting: **{fmt_value(current_val, unit)}**")
+    # Canonical state stored in off_{col}
+    st.session_state[state_key] = float(offset)
+    params_out[col] = base_val + float(offset)
 
+    st.caption(f"Current setting: **{fmt_value(params_out[col], unit)}**")
+
+# ============================================================
 # Floating toggle (always visible)
+# ============================================================
 st.markdown('<div class="fixed-controls">', unsafe_allow_html=True)
 toggle_label = "Hide controls" if st.session_state.show_controls_panel else "Show controls"
-if st.button(toggle_label):
+if st.button(toggle_label, key="toggle_controls_panel"):
     st.session_state.show_controls_panel = not st.session_state.show_controls_panel
     st.rerun()
 st.markdown("</div>", unsafe_allow_html=True)
 
-# If sidebar is collapsed, user can still use this panel
+# ============================================================
+# Main-page recovery controls panel (works even if sidebar is gone)
+# ============================================================
+compute_main = False
+params_main: dict[str, float] = {}
+
 if st.session_state.show_controls_panel:
     st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.subheader("Controls")
+    st.subheader("Controls (quick access)")
+    st.caption("If you’ve hidden the sidebar, use this panel — it does the same job.")
 
     c1, c2 = st.columns(2)
     with c1:
         if st.button("Reset sliders", key="reset_main"):
-            reset_offsets(feature_cols)  # reset all
+            reset_offsets(feature_cols)
             st.rerun()
     with c2:
         compute_main = st.button("Compute", type="primary", key="compute_main")
 
-    st.caption("If you’ve hidden the sidebar, use this panel instead — it does the same job.")
-
     st.markdown("---")
     st.markdown("**Key parameters**")
-    params_main = {}
-
-    def slider_for_main(col: str):
-        unit = PARAM_UNITS.get(col, "")
-        base_val = float(baseline[col])
-        left = float(smin[col] - base_val)
-        right = float(smax[col] - base_val)
-        key = f"off_{col}"
-        if key not in st.session_state:
-            st.session_state[key] = 0.0
-
-        offset = st.slider(
-            f"{pretty_param_name(col)} ({unit})" if unit else pretty_param_name(col),
-            left, right,
-            float(st.session_state[key]),
-            0.001,
-            key=f"{key}_main"  # separate widget key
-        )
-        # keep the true state in the canonical key
-        st.session_state[key] = offset
-        params_main[col] = base_val + offset
-
     for col in slider_features:
-        slider_for_main(col)
+        add_slider(col, params_main, widget_suffix="_main")
 
-    st.markdown("---")
     with st.expander("All parameters", expanded=False):
         for col in [c for c in feature_cols if c not in slider_features]:
-            slider_for_main(col)
+            add_slider(col, params_main, widget_suffix="_main_all")
 
     st.markdown("</div>", unsafe_allow_html=True)
-else:
-    compute_main = False
-    params_main = {}
+
+# ============================================================
+# Sidebar controls (normal route)
+# ============================================================
+compute_sidebar = False
+params_sidebar: dict[str, float] = {}
 
 with st.sidebar:
     st.header("Controls")
@@ -426,38 +372,39 @@ with st.sidebar:
 
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("Reset sliders"):
-            reset_offsets(feature_cols)  # reset all
+        if st.button("Reset sliders", key="reset_sidebar"):
+            reset_offsets(feature_cols)
             st.rerun()
     with c2:
-        compute = st.button("Compute", type="primary")
-        compute = compute or compute_main
+        compute_sidebar = st.button("Compute", type="primary", key="compute_sidebar")
 
     st.divider()
 
-    # Merge params from sidebar and main panel
-    params.update(params_main)
-
     st.markdown('<div class="highlight-box">', unsafe_allow_html=True)
     st.subheader("Key parameters")
-    st.markdown(
-        '<div class="small-muted">These are highlighted because they tend to drive most of the variation in this surrogate.</div>',
-        unsafe_allow_html=True,
-    )
+    st.markdown('<div class="small-muted">Highlighted because they tend to drive most of the variation in this surrogate.</div>', unsafe_allow_html=True)
     for col in slider_features:
-        slider_for(col, params)
+        add_slider(col, params_sidebar, widget_suffix="_sb")
     st.markdown("</div>", unsafe_allow_html=True)
 
     st.subheader("All parameters")
-    st.markdown('<div class="small-muted">The rest are included for completeness.</div>', unsafe_allow_html=True)
-    others = [c for c in feature_cols if c not in slider_features]
-    for col in others:
-        slider_for(col, params)
+    st.markdown('<div class="small-muted">Included for completeness.</div>', unsafe_allow_html=True)
+    for col in [c for c in feature_cols if c not in slider_features]:
+        add_slider(col, params_sidebar, widget_suffix="_sb_all")
 
     st.divider()
     st.caption("Built by ebprasad")
 
-# Build full parameter vector (non-slider values are baseline unless changed)
+# ============================================================
+# Merge params + compute
+#   baseline -> sidebar -> main (main wins if open)
+# ============================================================
+params = {}
+params.update(params_sidebar)
+params.update(params_main)
+
+compute = compute_sidebar or compute_main
+
 full_params = dict(baseline)
 full_params.update(params)
 
@@ -470,16 +417,14 @@ if not compute:
     with left:
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.subheader("Predicted coefficients")
-        st.info("Adjust sliders in the sidebar, then click **Compute**.")
+        st.info("Adjust sliders in the sidebar (or the quick panel), then click **Compute**.")
         st.markdown("</div>", unsafe_allow_html=True)
 
     with right:
         st.markdown('<div class="card">', unsafe_allow_html=True)
         st.subheader("Uncertainty / reliability")
         st.info("Click **Compute** to evaluate uncertainty for the current configuration.")
-        st.caption(
-            "As a rule of thumb, the ensemble tends to agree more near the baseline, and less as you push towards the edges of dataset coverage."
-        )
+        st.caption("As a rule of thumb, the ensemble tends to agree more near the baseline, and less as you push towards the edges of dataset coverage.")
         st.markdown("</div>", unsafe_allow_html=True)
 
     st.stop()
@@ -506,7 +451,6 @@ with left:
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.subheader("Predicted coefficients")
 
-    # 2x2 layout
     r1c1, r1c2 = st.columns(2)
     r2c1, r2c2 = st.columns(2)
 
@@ -580,13 +524,11 @@ This is a practical reliability check, not a guaranteed probability.
     else:
         st.success("All outputs are below their p90 thresholds. This is a lower-uncertainty region.")
 
-    st.caption(
-        "As a rule of thumb, the ensemble tends to agree more near the baseline, and less as you push towards the edges of dataset coverage."
-    )
+    st.caption("As a rule of thumb, the ensemble tends to agree more near the baseline, and less as you push towards the edges of dataset coverage.")
     st.markdown("</div>", unsafe_allow_html=True)
 
 # ============================================================
-# Technical evaluation (model card) — no CSV dumps
+# Technical evaluation (model card)
 # ============================================================
 st.markdown('<div class="card">', unsafe_allow_html=True)
 st.subheader("Technical evaluation (model card)")
@@ -616,10 +558,7 @@ if df_final is None or df_final.empty or not set(["target", "RMSE", "R2"]).issub
     st.warning("Final test metrics aren’t available in this deployment.")
 else:
     df_final = df_final.copy()
-    # order by target list
     df_final = df_final.set_index("target").reindex(targets).reset_index()
-
-    # short table
     show_cols = [c for c in ["target", "MAE", "RMSE", "R2"] if c in df_final.columns]
     perf_tbl = df_final[show_cols]
 
@@ -668,44 +607,6 @@ else:
         show.style.format({"Best RMSE": "{:.6f}", "Best R²": "{:.4f}", "Ridge RMSE": "{:.6f}", "Ridge R²": "{:.4f}"}),
         use_container_width=True,
     )
-
-    # Mild, non-boasty note
-    close = 0
-    total = 0
-    for _, row in compact.iterrows():
-        if pd.notna(row.get("ridge_RMSE")) and pd.notna(row.get("best_RMSE")):
-            total += 1
-            if float(row["ridge_RMSE"]) <= float(row["best_RMSE"]) * 1.05:
-                close += 1
-    if total > 0:
-        st.caption(f"As a sense-check, Ridge sits within ~5% of the best RMSE on **{close}/{total}** targets in this sweep.")
-
-st.divider()
-st.markdown("**Calibration thresholds (p90)**")
-
-# Prefer thresholds used by the app (from config), then show CSV as reference if present.
-thr_used = {}
-for t in ["cd", "cl", "clf", "clr"]:
-    k = f"{t}_std_p90"
-    if k in thr:
-        try:
-            thr_used[k] = float(thr[k])
-        except Exception:
-            pass
-
-if thr_used:
-    parts = [f"{t}: {thr_used[f'{t}_std_p90']:.2e}" for t in ["cd", "cl", "clf", "clr"] if f"{t}_std_p90" in thr_used]
-    st.markdown(
-        "Low-confidence flags are triggered when the ensemble standard deviation exceeds the p90 threshold. "
-        f"Thresholds in use: **{', '.join(parts)}**."
-    )
-    st.dataframe(pd.DataFrame([thr_used]).style.format("{:.6e}"), use_container_width=True)
-else:
-    st.info("No p90 thresholds were found in the current config.")
-
-if df_thr_csv is not None and not df_thr_csv.empty:
-    st.caption("Reference thresholds table (as generated during calibration):")
-    st.dataframe(df_thr_csv.style.format("{:.6e}"), use_container_width=True)
 
 st.divider()
 st.markdown("**Engineering interpretation / limitations**")
