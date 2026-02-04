@@ -1,4 +1,5 @@
 import json
+import random
 from pathlib import Path
 
 import numpy as np
@@ -14,6 +15,69 @@ MODELS_DIR = Path("models")
 N_MODELS = 30
 
 st.set_page_config(page_title="DrivAerML Aero Surrogate", layout="wide")
+
+# ----------------------------
+# Text variation (native UK tone, lightly “analyst-like”)
+# ----------------------------
+OPENERS = [
+    "From what I can see,",
+    "Based on the current inputs,",
+    "Looking at the outputs,",
+    "The results suggest",
+    "It looks like",
+    "On this run,",
+    "This setup indicates",
+    "From the model’s prediction,",
+]
+
+TRUST_HIGH = [
+    "Uncertainty is below the p90 threshold, so I’m reasonably happy with this one.",
+    "The ensemble agrees well here, which is a good sign.",
+    "This sits in a lower-uncertainty region, so I’d treat it as fairly reliable.",
+    "Model disagreement is low, so this looks like a confident estimate.",
+]
+
+TRUST_LOW = [
+    "Uncertainty is above the p90 threshold, so I’d treat this as indicative and verify with CFD if it matters.",
+    "The ensemble disagrees more than usual here — worth a cross-check before you act on it.",
+    "This is in a higher-uncertainty region, so I wouldn’t rely on it without verification.",
+    "It’s nudging the edge of what the model has seen — I’d take it as a direction of travel rather than a guarantee.",
+]
+
+TEMPLATES_GENERIC = [
+    "{opener} the vehicle’s {metric} {direction} {pct} compared with baseline. {trust}",
+    "{opener} {metric} {direction} {pct} versus baseline (Δ={abs}). {trust}",
+    "{opener} I’m seeing a {direction_word} in {metric}: {pct}. {trust}",
+    "{opener} relative to baseline, {metric} {direction} {pct}. {trust}",
+    "{opener} {metric} {direction} {pct}; from the uncertainty check: {trust}",
+    "{opener} the predicted {metric} {direction} {pct} (Δ={abs}). {trust}",
+]
+
+def make_statement(metric_name: str, delta_abs: float, delta_pct: float, is_low_conf: bool, plain: str | None = None):
+    opener = random.choice(OPENERS)
+    trust = random.choice(TRUST_LOW if is_low_conf else TRUST_HIGH)
+
+    direction = "has decreased by" if delta_pct < 0 else "has increased by"
+    direction_word = "reduction" if delta_pct < 0 else "increase"
+
+    pct_str = f"{abs(delta_pct):.2f}%"
+    abs_str = f"{delta_abs:+.6f}"
+
+    template = random.choice(TEMPLATES_GENERIC)
+
+    # Occasionally add the extra context line (keeps it fresh without being noisy)
+    if plain and random.random() < 0.35:
+        template = template + f" ({plain})"
+
+    return template.format(
+        opener=opener,
+        metric=metric_name,
+        direction=direction,
+        direction_word=direction_word,
+        pct=pct_str,
+        abs=abs_str,
+        trust=trust,
+    )
 
 # ----------------------------
 # Helpers
@@ -67,7 +131,7 @@ baseline = cfg["baseline"]
 smin = cfg["slider_min"]
 smax = cfg["slider_max"]
 
-thr = cfg["uncertainty_thresholds"]  # should include *_std_p90 for all 4 targets
+thr = cfg["uncertainty_thresholds"]  # expects cd/cl/clf/clr std p90 entries
 baseline_outputs = cfg["baseline_outputs"]
 
 # ----------------------------
@@ -77,20 +141,21 @@ st.title("DrivAerML Aero Surrogate — Interactive Coefficient Predictor")
 
 st.markdown(
     """
-**What this is:** A fast *surrogate model* trained on the **DrivAerML** dataset (500 parametrically-morphed DrivAer notchback geometries with high-fidelity CFD force coefficients).
+**What this is:** a fast *surrogate model* trained on **DrivAerML** (500 parametrically-morphed DrivAer geometries with CFD force coefficients).
 
-**Model:** An **ensemble of Ridge Regression models** (linear model with L2 regularisation), predicting **cd, cl, clf, clr** from geometry parameters.
+**Model:** an **ensemble of Ridge Regression models** (linear, L2-regularised), predicting **cd, cl, clf, clr** from geometry parameters.
 
-**How to use it:** Sliders adjust key geometry parameters around a reference (“baseline”) geometry (here: the **dataset mean**). Click **Compute** to see predicted coefficients and a comparison vs baseline.
+**How to use it:** the sliders tweak a handful of influential geometry parameters around a reference (“baseline”) geometry (here: the **dataset mean**).  
+Click **Compute** to get predictions and a comparison vs baseline.
 """
 )
 
 with st.expander("Baseline and slider limits (quick note)", expanded=False):
     st.markdown(
         """
-- **Baseline geometry:** The mean of the dataset parameters (a neutral reference point).
-- **Slider limits:** 5th–95th percentile of the dataset for each parameter (helps avoid extreme, out-of-distribution inputs).
-- **Interpretation:** Predictions are most reliable for *interpolation* within the dataset coverage.
+- **Baseline geometry:** mean of the dataset parameters (a neutral reference).
+- **Slider limits:** 5th–95th percentile from the dataset (helps avoid extreme out-of-distribution inputs).
+- **Interpretation:** it’s most trustworthy when interpolating within the dataset coverage.
 """
     )
 
@@ -99,7 +164,7 @@ with st.expander("Baseline and slider limits (quick note)", expanded=False):
 # ----------------------------
 with st.sidebar:
     st.header("Controls")
-    st.caption("To keep this demo tidy, you’re only seeing the most influential parameters (top 6–8).")
+    st.caption("To keep the demo tidy, you’re only seeing the most influential parameters (top 6–8).")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -111,7 +176,7 @@ with st.sidebar:
 
     st.divider()
     st.subheader("Key geometry sliders")
-    st.caption("Sliders are offsets from baseline. The app uses baseline values for all non-shown parameters.")
+    st.caption("Sliders are offsets from baseline. Parameters not shown stay at baseline.")
 
     params = {}
     for col in slider_features:
@@ -126,7 +191,7 @@ with st.sidebar:
         offset = st.slider(pretty_param_name(col), left, right, float(st.session_state[key]), 0.001, key=key)
         params[col] = base_val + offset
 
-# Fill non-slider parameters with baseline so we always pass full feature vector to the model
+# Fill non-slider parameters with baseline (full feature vector always)
 full_params = dict(baseline)
 full_params.update(params)
 
@@ -146,6 +211,18 @@ unc = {t: float(std[0, i]) for i, t in enumerate(targets)}
 delta = {t: pred[t] - baseline_outputs[t] for t in targets}
 delta_pct = {t: pct_change(pred[t], baseline_outputs[t]) for t in targets}
 
+# flags using p90 thresholds
+def is_low_conf(t):
+    thr_val = float(thr.get(f"{t}_std_p90", np.nan))
+    if np.isnan(thr_val):
+        return False
+    return unc[t] > thr_val
+
+cd_low = is_low_conf("cd")
+cl_low = is_low_conf("cl")
+clf_low = is_low_conf("clf")
+clr_low = is_low_conf("clr")
+
 # ----------------------------
 # Main layout
 # ----------------------------
@@ -162,27 +239,41 @@ with left:
 
     st.subheader("Engineering summary (vs baseline)")
 
-cd_low = unc["cd"] > float(thr["cd_std_p90"])
-cl_low = unc["cl"] > float(thr["cl_std_p90"])
-clf_low = unc["clf"] > float(thr["clf_std_p90"])
-clr_low = unc["clr"] > float(thr["clr_std_p90"])
+    st.markdown("**Drag (cd)**")
+    st.write(make_statement(
+        "drag coefficient (cd)",
+        delta["cd"],
+        delta_pct["cd"],
+        cd_low,
+        plain="Lower drag typically helps top speed and efficiency."
+    ))
 
-st.markdown("**Drag (cd)**")
-st.write(make_statement("drag coefficient (cd)", delta["cd"], delta_pct["cd"], cd_low,
-                        plain="Lower drag usually helps efficiency and top speed."))
+    st.markdown("**Lift (cl)**")
+    st.write(make_statement(
+        "lift coefficient (cl)",
+        delta["cl"],
+        delta_pct["cl"],
+        cl_low,
+        plain="Interpretation depends on sign convention (lift vs downforce)."
+    ))
 
-st.markdown("**Lift (cl)**")
-st.write(make_statement("lift coefficient (cl)", delta["cl"], delta_pct["cl"], cl_low,
-                        plain="Interpretation depends on the sign convention used for lift/downforce."))
+    st.markdown("**Front lift (clf)**")
+    st.write(make_statement(
+        "front lift coefficient (clf)",
+        delta["clf"],
+        delta_pct["clf"],
+        clf_low,
+        plain="Affects front-end aero balance and turn-in feel."
+    ))
 
-st.markdown("**Front lift (clf)**")
-st.write(make_statement("front lift coefficient (clf)", delta["clf"], delta_pct["clf"], clf_low,
-                        plain="Changes here influence front aero balance."))
-
-st.markdown("**Rear lift (clr)**")
-st.write(make_statement("rear lift coefficient (clr)", delta["clr"], delta_pct["clr"], clr_low,
-                        plain="Changes here influence rear aero balance."))
-
+    st.markdown("**Rear lift (clr)**")
+    st.write(make_statement(
+        "rear lift coefficient (clr)",
+        delta["clr"],
+        delta_pct["clr"],
+        clr_low,
+        plain="Affects rear stability, especially in high-speed corners."
+    ))
 
     st.subheader("Baseline vs predicted (table)")
     tbl = pd.DataFrame(
@@ -221,7 +312,6 @@ st.write(make_statement("rear lift coefficient (clr)", delta["clr"], delta_pct["
         plt.title("Predicted change vs baseline")
 
         for i, v in enumerate(vals):
-            # avoid NaN label
             if not np.isnan(v):
                 plt.text(i, v, f"{v:+.1f}%", ha="center", va="bottom" if v >= 0 else "top")
 
@@ -243,11 +333,11 @@ with right:
     with st.expander("What do “std” and “p90” mean?", expanded=False):
         st.markdown(
             """
-- **std (standard deviation):** In this app it’s the *disagreement* between the models in the ensemble.  
-  If the models broadly agree, the std is small — that’s usually a sign the prediction is more reliable in that region.
+- **std (standard deviation):** in this app it’s the *disagreement* between models in the ensemble.  
+  If they all broadly agree, std stays small — usually a sign the prediction is more trustworthy in that region.
 
-- **p90:** The 90th percentile of uncertainty on a held-out calibration split.  
-  If the std is above p90, the prediction falls into the most uncertain ~10% of cases, so it’s flagged as **low confidence**.
+- **p90:** the 90th percentile of uncertainty on a held-out calibration split.  
+  If std is above p90, the prediction lands in the most uncertain ~10% of cases, so it’s flagged as **low confidence**.
 
 This is a practical reliability check — not a guaranteed probability.
 """
@@ -270,76 +360,10 @@ This is a practical reliability check — not a guaranteed probability.
 
     if any(flags):
         st.warning(
-            "One or more outputs are in a higher-uncertainty region. "
-            "In a real workflow, you’d normally verify these cases with CFD / higher fidelity."
+            "One or more outputs sit in a higher-uncertainty region. "
+            "In a real workflow, you’d usually verify those cases with CFD / higher fidelity."
         )
     else:
         st.success("All outputs sit in a lower-uncertainty region (below the p90 thresholds).")
 
-    st.caption(
-        "Tip: The uncertainty tends to be lowest near the baseline and higher near the edge of the dataset coverage."
-    )
-
-import random
-
-OPENERS = [
-    "From what I can see,",
-    "Based on the current inputs,",
-    "Looking at the outputs,",
-    "The results suggest",
-    "It appears",
-    "On this run,",
-    "This configuration indicates",
-    "From the model’s prediction,",
-]
-
-TRUST_HIGH = [
-    "This sits in a lower-uncertainty region, so I’d treat it as fairly reliable.",
-    "Uncertainty is below the p90 threshold, so this looks like a confident prediction.",
-    "The ensemble agreement is good here, which is reassuring.",
-    "This is within the model’s comfort zone (low disagreement across the ensemble).",
-]
-
-TRUST_LOW = [
-    "Uncertainty is above the p90 threshold, so I’d treat this as a higher-risk estimate and verify with CFD if it matters.",
-    "This falls into a higher-uncertainty region — I wouldn’t rely on it without a cross-check.",
-    "The ensemble disagreement is relatively high here, so I’d recommend a verification step.",
-    "This is edging towards the limits of what the model has seen — consider it indicative rather than definitive.",
-]
-
-TEMPLATES_GENERIC = [
-    "{opener} the vehicle’s {metric} {direction} {pct}. {trust}",
-    "{opener} {metric} {direction} {pct} relative to baseline (Δ={abs}). {trust}",
-    "{opener} I’m seeing a {direction_word} in {metric}: {pct}. {trust}",
-    "{opener} compared with baseline, {metric} {direction} {pct}. {trust}",
-    "{opener} {metric} {direction} {pct}; the uncertainty check says: {trust}",
-    "{opener} the predicted {metric} {direction} {pct} (Δ={abs}). {trust}",
-    "{opener} {metric} has shifted {direction_word}: {pct}. {trust}",
-]
-
-def make_statement(metric_name: str, delta_abs: float, delta_pct: float, is_low_conf: bool, plain: str | None = None):
-    opener = random.choice(OPENERS)
-    trust = random.choice(TRUST_LOW if is_low_conf else TRUST_HIGH)
-
-    direction = "has decreased by" if delta_pct < 0 else "has increased by"
-    direction_word = "reduction" if delta_pct < 0 else "increase"
-
-    pct_str = f"{abs(delta_pct):.2f}%"
-    abs_str = f"{delta_abs:+.6f}"
-
-    template = random.choice(TEMPLATES_GENERIC)
-
-    # Optional extra context
-    if plain and random.random() < 0.35:
-        template = template + f" ({plain})"
-
-    return template.format(
-        opener=opener,
-        metric=metric_name,
-        direction=direction,
-        direction_word=direction_word,
-        pct=pct_str,
-        abs=abs_str,
-        trust=trust,
-    )
-
+    st.caption("Tip: uncertainty is often lowest near baseline, and rises as you push towards the edge of dataset coverage.")
