@@ -158,3 +158,8 @@ if compute:
         )
 else:
     st.info("Move sliders (0 = baseline) and click **Compute**.")
+
+if not (MODELS_DIR / "ui_config_4targets.json").exists():
+    st.error("Missing models/ui_config_4targets.json. Make sure it's committed to the repo.")
+    st.stop()
+
