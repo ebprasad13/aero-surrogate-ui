@@ -17,6 +17,16 @@
     "Vehicle_Ride_Height",
     "Vehicle_Pitch"
   ],
+  "slider_features": [
+    "Vehicle_Pitch",
+    "Vehicle_Width",
+    "Rear_Overhang",
+    "Approach_Angle",
+    "Decklid_Height",
+    "Rearend_tapering",
+    "Vehicle_Height",
+    "Rear_Diffusor_Angle"
+  ],
   "targets": [
     "cd",
     "cl",
@@ -90,11 +100,15 @@
     "clr": 0.00037645641448509707
   },
   "uncertainty_thresholds": {
-    "cd_std_p90": 0.001444,
-    "cl_std_p90": 0.002911
+    "cd_std_p90": 0.001333664139636723,
+    "cl_std_p90": 0.0027777751107246687,
+    "clf_std_p90": 0.0019540379821998714,
+    "clr_std_p90": 0.0021155966924794626
   },
   "notes": {
     "baseline_definition": "Dataset mean of geometry parameters",
-    "slider_limits": "5th\u201395th percentile of dataset"
+    "slider_limits": "5th\u201395th percentile of dataset",
+    "threshold_definition": "90th percentile of ensemble std on a calibration split",
+    "feature_ranking": "Top K by sum(|standardized Ridge coefficients|) across cd/cl/clf/clr"
   }
 }
